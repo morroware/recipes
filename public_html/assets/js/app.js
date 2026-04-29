@@ -37,8 +37,6 @@ export function toast(message, kind = 'info') {
   if (!toastEl) {
     toastEl = document.createElement('div');
     toastEl.className = 'shop-toast';
-    toastEl.setAttribute('role', 'status');
-    toastEl.setAttribute('aria-live', 'polite');
     Object.assign(toastEl.style, {
       position: 'fixed',
       left: '50%',
@@ -54,6 +52,9 @@ export function toast(message, kind = 'info') {
   toastEl.textContent = message;
   toastEl.dataset.kind = kind;
   toastEl.style.background = (kind === 'error') ? 'var(--coral, #FFB3B3)' : 'var(--mint)';
+  // Errors are interruptive; everything else is polite.
+  toastEl.setAttribute('role', kind === 'error' ? 'alert' : 'status');
+  toastEl.setAttribute('aria-live', kind === 'error' ? 'assertive' : 'polite');
   // re-trigger entrance animation
   toastEl.style.animation = 'none';
   void toastEl.offsetWidth;

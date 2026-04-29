@@ -109,14 +109,15 @@ $stepsJson       = json_encode(array_column($recipe['steps'], 'text'), JSON_UNES
     </div>
   </div>
 
-  <dialog class="cook-dialog" data-bind="cook-dialog">
+  <dialog class="cook-dialog" data-bind="cook-dialog"
+          aria-labelledby="cook-dialog-title" aria-modal="true">
     <div class="cook-overlay" style="position: static;">
       <div class="cook-header">
         <div>
           <div class="page-eyebrow">COOKING</div>
-          <h2 style="margin-top: 4px;"><?= h($recipe['title']) ?> <?= h($recipe['glyph']) ?></h2>
+          <h2 id="cook-dialog-title" style="margin-top: 4px;"><?= h($recipe['title']) ?> <?= h($recipe['glyph']) ?></h2>
         </div>
-        <button class="btn" type="button" data-action="cook-close">✕ Exit</button>
+        <button class="btn" type="button" data-action="cook-close" aria-label="Exit cooking mode">✕ Exit</button>
       </div>
       <div class="cook-progress"><div class="cook-progress-fill" data-bind="cook-progress" style="width: 0%;"></div></div>
       <div class="cook-step-num" data-bind="cook-step-num">STEP 1 OF <?= count($recipe['steps']) ?></div>

@@ -36,6 +36,7 @@ require_once SRC_PATH . '/lib/response.php';
 require_once SRC_PATH . '/lib/view.php';
 require_once SRC_PATH . '/lib/constants.php';
 require_once SRC_PATH . '/lib/pantry_helpers.php';
+require_once SRC_PATH . '/lib/version.php';
 
 // 4) Tiny autoloader for src/controllers/*.php and src/models/*.php.
 spl_autoload_register(static function (string $class): void {
@@ -134,5 +135,8 @@ function home_placeholder(): void {
 }
 
 function healthz(): void {
-    json_ok(['phase' => 2, 'logged_in' => is_logged_in()]);
+    json_ok([
+        'logged_in' => is_logged_in(),
+        'app'       => version_info(),
+    ]);
 }

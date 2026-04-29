@@ -32,13 +32,17 @@ $active = $active ?? '';
   <link rel="stylesheet" href="/assets/css/styles.css">
   <link rel="stylesheet" href="/assets/css/recipe-picker.css">
   <meta name="csrf-token" content="<?= h(function_exists('csrf_token') ? csrf_token() : '') ?>">
+  <meta name="app-version" content="<?= h(defined('APP_VERSION') ? APP_VERSION : '') ?>">
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
   <div id="app">
     <?php if (function_exists('is_logged_in') && is_logged_in()): ?>
       <?php require SRC_PATH . '/views/_partials/topnav.php'; ?>
     <?php endif; ?>
-    <?php require $body_view; ?>
+    <main id="main-content" tabindex="-1">
+      <?php require $body_view; ?>
+    </main>
   </div>
   <script type="module" src="/assets/js/app.js"></script>
   <?php if (function_exists('is_logged_in') && is_logged_in()): ?>

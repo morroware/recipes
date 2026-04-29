@@ -76,20 +76,34 @@ if (root) {
   const stepTextEl  = root.querySelector('[data-bind="cook-step-text"]');
   const progressEl  = root.querySelector('[data-bind="cook-progress"]');
   let cookStep = 0;
+  let cookOpener = null;
 
   function openCookMode() {
     if (!dialog || steps.length === 0) return;
+    cookOpener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     cookStep = 0;
     setCookStep(0);
     if (typeof dialog.showModal === 'function') dialog.showModal();
     else dialog.setAttribute('open', '');
     document.addEventListener('keydown', onCookKey);
+    const nextBtn = root.querySelector('[data-action="cook-next"], [data-action="cook-close"]');
+    if (nextBtn) nextBtn.focus();
   }
   function closeCookMode() {
     if (!dialog) return;
     if (typeof dialog.close === 'function') dialog.close();
     else dialog.removeAttribute('open');
-    document.removeEventListener('keydown', onCookKey);
+  }
+  // Native `close` fires for ESC, dialog.close(), and form-method=dialog submits.
+  // Centralizing cleanup here means we never leak the keydown handler.
+  if (dialog) {
+    dialog.addEventListener('close', () => {
+      document.removeEventListener('keydown', onCookKey);
+      if (cookOpener && typeof cookOpener.focus === 'function') {
+        cookOpener.focus();
+      }
+      cookOpener = null;
+    });
   }
   function setCookStep(n) {
     if (!steps.length) return;

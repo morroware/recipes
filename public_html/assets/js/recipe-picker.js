@@ -109,7 +109,7 @@ export class RecipePicker {
     list.style.maxHeight = this.height + 'px';
     list.setAttribute('role', this.mode === 'multi' ? 'listbox' : 'radiogroup');
     if (this.mode === 'multi') list.setAttribute('aria-multiselectable', 'true');
-    list.tabIndex = 0;
+    // The list itself isn't tabbable — roving tabindex on rows handles it.
     list.addEventListener('keydown', (e) => this.onKeyDown(e, list));
     this.list = list;
     this.refreshList();
@@ -202,6 +202,10 @@ export class RecipePicker {
       return;
     }
     for (const r of filtered) list.appendChild(this.renderRow(r));
+    // Make exactly one row tabbable: prefer the selected one, else the first.
+    const rows = Array.from(list.querySelectorAll('.recipe-picker-row'));
+    let anchor = rows.find((li) => li.classList.contains('selected')) || rows[0];
+    if (anchor) anchor.tabIndex = 0;
   }
 
   renderRow(r) {
@@ -211,7 +215,9 @@ export class RecipePicker {
     li.dataset.recipeId = String(r.id);
     li.setAttribute('role', this.mode === 'multi' ? 'option' : 'radio');
     li.setAttribute('aria-selected', sel ? 'true' : 'false');
-    li.tabIndex = 0;
+    // Roving tabindex — only one row tabbable at a time. The active one is
+    // assigned in refreshList() once the DOM order is final.
+    li.tabIndex = -1;
 
     const thumb = document.createElement('span');
     thumb.className = 'recipe-picker-thumb';
@@ -268,14 +274,24 @@ export class RecipePicker {
     const rows = Array.from(list.querySelectorAll('.recipe-picker-row'));
     if (!rows.length) return;
     const idx = rows.indexOf(document.activeElement);
+    const focusRow = (n) => {
+      // Roving tabindex: the focused row is the only tabbable one.
+      rows.forEach((li) => { li.tabIndex = -1; });
+      n.tabIndex = 0;
+      n.focus();
+    };
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      const n = rows[Math.min(rows.length - 1, idx < 0 ? 0 : idx + 1)];
-      n.focus();
+      focusRow(rows[Math.min(rows.length - 1, idx < 0 ? 0 : idx + 1)]);
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      const n = rows[Math.max(0, idx < 0 ? 0 : idx - 1)];
-      n.focus();
+      focusRow(rows[Math.max(0, idx < 0 ? 0 : idx - 1)]);
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      focusRow(rows[0]);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      focusRow(rows[rows.length - 1]);
     } else if (e.key === 'Enter' || e.key === ' ') {
       if (idx >= 0) {
         e.preventDefault();

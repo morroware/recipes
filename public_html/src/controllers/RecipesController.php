@@ -21,6 +21,7 @@ class RecipesController {
 
         render('browse/index.php', [
             'title'    => 'my little cookbook',
+            'active'   => 'browse',
             'recipes'  => $recipes,
             'cuisines' => $cuisines,
             'tags'     => $tags,
@@ -34,6 +35,7 @@ class RecipesController {
         $recipes = Recipe::listForUser($uid, ['favorites_only' => true]);
         render('browse/favorites.php', [
             'title'   => 'favorites · my little cookbook',
+            'active'  => 'favorites',
             'recipes' => $recipes,
         ]);
     }
