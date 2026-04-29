@@ -1,4 +1,3 @@
-<?php /** @var Closure $h */ ?>
 <div class="page">
   <div class="hero">
     <div class="page-eyebrow" style="color: rgba(251,247,240,0.6); margin-bottom: 8px;">YOUR LITTLE COOKBOOK</div>
