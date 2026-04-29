@@ -88,12 +88,22 @@ document.addEventListener('click', async (e) => {
   if (!recipeId) return;
   btn.disabled = true;
   try {
-    const { data } = await apiFetch(appUrl(`/api/recipes/${recipeId}/favorite`), { method: 'POST' });
+    const { data } = await apiFetch(`/api/recipes/${recipeId}/favorite`, { method: 'POST' });
     const fav = !!(data && data.is_favorite);
     btn.classList.toggle('active', fav);
     btn.setAttribute('aria-pressed', fav ? 'true' : 'false');
     if (btn.classList.contains('recipe-card-fav')) {
       btn.textContent = fav ? '♥' : '♡';
+      // On the favorites page, remove cards as they're un-favorited so the
+      // grid stays consistent with what the page is showing.
+      if (!fav && document.querySelector('[data-page="favorites"]')) {
+        const card = btn.closest('.recipe-card');
+        if (card) {
+          card.style.transition = 'opacity 200ms';
+          card.style.opacity = '0';
+          setTimeout(() => card.remove(), 220);
+        }
+      }
     } else {
       btn.classList.toggle('btn-coral', fav);
       btn.textContent = fav ? '♥ Saved' : '♡ Save';

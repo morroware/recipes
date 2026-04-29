@@ -99,7 +99,10 @@ $stepsJson       = json_encode(array_column($recipe['steps'], 'text'), JSON_UNES
       </div>
 
       <div class="detail-section no-print">
-        <h2>📝 Notes to self</h2>
+        <div class="row" style="justify-content: space-between; align-items: baseline;">
+          <h2 style="margin: 0;">📝 Notes to self</h2>
+          <span class="muted mono" style="font-size: 12px;" data-bind="notes-status" aria-live="polite"></span>
+        </div>
         <textarea
           class="notes-area"
           data-action="save-notes"

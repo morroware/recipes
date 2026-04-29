@@ -78,15 +78,10 @@ if (page) {
       try {
         await apiFetch('/api/shopping', {
           method: 'POST',
-          body: JSON.stringify({ name, source: 'pantry' }),
+          body: JSON.stringify({ name, source_label: 'pantry' }),
         });
         toast(`+ Added "${name}" to shopping list`);
-      } catch (err) {
-        // Shopping API may not exist yet in earlier phases; fall back gracefully.
-        if (String(err.message).includes('404') || String(err.message).includes('not_found')) {
-          toast('Shopping list not available yet', 'error');
-        }
-      }
+      } catch { /* apiFetch already toasted */ }
       return;
     }
     if (action === 'edit-category') {

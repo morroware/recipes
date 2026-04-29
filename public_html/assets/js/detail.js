@@ -2,7 +2,7 @@
 // Servings scaler with metric/imperial conversion, cooking-mode dialog,
 // autosaving notes. Ported from project/pages-a.jsx (DetailPage + CookMode).
 
-import { apiFetch, toast } from '/assets/js/app.js';
+import { apiFetch, toast } from './app.js';
 
 const root = document.querySelector('[data-recipe]');
 if (root) {
@@ -131,18 +131,39 @@ if (root) {
 
   // ---- notes autosave ------------------------------------------------------
   const notes = root.querySelector('[data-action="save-notes"]');
+  const notesStatus = root.querySelector('[data-bind="notes-status"]');
   if (notes) {
     let t = null;
-    notes.addEventListener('input', () => {
+    let lastSaved = notes.value;
+    const setStatus = (msg) => { if (notesStatus) notesStatus.textContent = msg; };
+    const queueSave = () => {
       clearTimeout(t);
+      if (notes.value === lastSaved) { setStatus('Saved'); return; }
+      setStatus('Saving…');
       t = setTimeout(async () => {
         try {
           await apiFetch(`/api/recipes/${notes.dataset.recipeId}/notes`, {
             method: 'PUT',
             body: JSON.stringify({ notes: notes.value }),
           });
-        } catch { /* toast already emitted */ }
+          lastSaved = notes.value;
+          setStatus('✓ Saved');
+        } catch {
+          setStatus('Save failed');
+        }
       }, 600);
+    };
+    notes.addEventListener('input', queueSave);
+    notes.addEventListener('blur', () => {
+      // Force an immediate save on blur if there are unsaved changes.
+      if (notes.value === lastSaved) return;
+      clearTimeout(t);
+      setStatus('Saving…');
+      apiFetch(`/api/recipes/${notes.dataset.recipeId}/notes`, {
+        method: 'PUT',
+        body: JSON.stringify({ notes: notes.value }),
+      }).then(() => { lastSaved = notes.value; setStatus('✓ Saved'); })
+        .catch(() => setStatus('Save failed'));
     });
   }
 }

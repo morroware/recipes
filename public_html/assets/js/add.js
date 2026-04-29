@@ -144,7 +144,7 @@ if (page) {
       });
       const id = data?.id ?? recipeId;
       toast(mode === 'edit' ? '✓ Saved' : '✓ Recipe saved');
-      setTimeout(() => { location.href = `/recipes/${id}`; }, 400);
+      setTimeout(() => { location.href = appUrl(`/recipes/${id}`); }, 400);
     } catch (err) {
       if (status) status.textContent = '';
       btn.disabled = false;

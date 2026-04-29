@@ -1,5 +1,5 @@
 <?php /** @var array $recipes */ ?>
-<div class="page">
+<div class="page" data-page="favorites">
   <div class="page-header" style="margin: 24px 0 18px;">
     <div class="page-title-wrap">
       <h1>♥ Favorites</h1>

@@ -15,6 +15,7 @@ if (page) {
   const clearBtn  = page.querySelector('[data-js="clear-all"]');
   const addForm   = page.querySelector('[data-js="add-form"]');
 
+  const countPill = page.querySelector('[data-js="count-pill"]');
   const recompute = () => {
     if (!list) return;
     const rows = list.querySelectorAll('.shop-row');
@@ -27,7 +28,13 @@ if (page) {
       stockBtn.hidden = checked === 0;
       if (stockN) stockN.textContent = checked;
     }
-    if (total === 0) location.reload();
+    if (countPill) countPill.style.display = total === 0 ? 'none' : '';
+    if (clearBtn) clearBtn.hidden = total === 0;
+    if (total === 0) {
+      // Reload to render the server-side empty state and remove the list panel.
+      // This also hides the print/clear buttons via PHP conditionals.
+      location.reload();
+    }
   };
 
   // ---- add form ----------------------------------------------------------
