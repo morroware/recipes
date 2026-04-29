@@ -47,13 +47,19 @@ spl_autoload_register(static function (string $class): void {
 // 5) Route table. Each row: [METHOD, pattern, handler, requiresLogin].
 $routes = [
     // Public
-    ['GET',  '#^/login$#',                    [AuthController::class, 'showLogin'], false],
-    ['POST', '#^/login$#',                    [AuthController::class, 'postLogin'], false],
-    ['POST', '#^/logout$#',                   [AuthController::class, 'postLogout'], true],
-    ['GET',  '#^/healthz$#',                  'healthz', false],
+    ['GET',  '#^/login$#',                                   [AuthController::class, 'showLogin'],     false],
+    ['POST', '#^/login$#',                                   [AuthController::class, 'postLogin'],     false],
+    ['POST', '#^/logout$#',                                  [AuthController::class, 'postLogout'],    true],
+    ['GET',  '#^/healthz$#',                                 'healthz',                                false],
 
-    // Authenticated home (placeholder until Phase 3 lands the Browse page).
-    ['GET',  '#^/$#',                         'home_placeholder', true],
+    // Authenticated pages
+    ['GET',  '#^/$#',                                        [RecipesController::class, 'browse'],     true],
+    ['GET',  '#^/favorites$#',                               [RecipesController::class, 'favorites'],  true],
+    ['GET',  '#^/recipes/(\d+)$#',                           [RecipesController::class, 'show'],       true],
+
+    // JSON API
+    ['POST', '#^/api/recipes/(\d+)/favorite$#',              [RecipesController::class, 'toggleFavorite'], true],
+    ['PUT',  '#^/api/recipes/(\d+)/notes$#',                 [RecipesController::class, 'updateNotes'],    true],
 ];
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';

@@ -33,7 +33,11 @@ $active = $active ?? '';
 </head>
 <body>
   <div id="app">
+    <?php if (function_exists('is_logged_in') && is_logged_in()): ?>
+      <?php require SRC_PATH . '/views/_partials/topnav.php'; ?>
+    <?php endif; ?>
     <?php require $body_view; ?>
   </div>
+  <script type="module" src="/assets/js/app.js"></script>
 </body>
 </html>
