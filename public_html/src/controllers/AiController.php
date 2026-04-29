@@ -6,20 +6,153 @@ declare(strict_types=1);
 
 class AiController {
 
-    public function apiStatus(): void {
-        require_login();
-        json_ok([
-            'enabled' => ai_enabled(),
-            'model'   => AI_DEFAULT_MODEL,
+    public function page(): void {
+        $uid = require_login();
+        render('chat/page.php', [
+            'title'         => 'Kitchen brain',
+            'active'        => 'chat',
+            'memories'      => Memory::listForUser($uid, 80),
+            'conversations' => Conversation::listForUser($uid, 50),
+            'recent_cooks'  => CookingLog::recent($uid, 10),
         ]);
     }
 
-    /**
-     * POST /api/ai/parse-ingredients
-     * Body: { text: "shopping list dump" }
-     * Returns: { items: [{name, qty, unit, category, in_stock}], added: [...] }
-     * If `commit: true`, also writes parsed items into the pantry.
-     */
+    public function apiStatus(): void {
+        $uid = require_login();
+        $memCount = 0;
+        try {
+            $memCount = count(Memory::listForUser($uid));
+        } catch (Throwable $e) {}
+        json_ok([
+            'enabled'      => ai_enabled(),
+            'model'        => AI_DEFAULT_MODEL,
+            'memory_count' => $memCount,
+        ]);
+    }
+
+    // ---- Memories ----------------------------------------------------------
+
+    public function apiMemoriesList(): void {
+        $uid = require_login();
+        json_ok(['memories' => Memory::listForUser($uid)]);
+    }
+
+    public function apiMemoriesCreate(): void {
+        $uid = require_login();
+        csrf_require();
+        $body = self::readJson();
+        $fact = trim((string)($body['fact'] ?? ''));
+        if ($fact === '') json_err('fact_required', 422);
+        $row = Memory::add(
+            $uid,
+            $fact,
+            (string)($body['category'] ?? 'other'),
+            'user',
+            isset($body['weight']) ? (int)$body['weight'] : 7,
+            !empty($body['pinned'])
+        );
+        if (!$row) json_err('invalid', 422);
+        json_ok(['memory' => $row]);
+    }
+
+    public function apiMemoriesUpdate(string $id): void {
+        $uid = require_login();
+        csrf_require();
+        $body = self::readJson();
+        $row = Memory::update($uid, (int)$id, $body);
+        if (!$row) json_err('not_found', 404);
+        json_ok(['memory' => $row]);
+    }
+
+    public function apiMemoriesDelete(string $id): void {
+        $uid = require_login();
+        csrf_require();
+        $ok = Memory::delete($uid, (int)$id);
+        json_ok(['deleted' => $ok]);
+    }
+
+    public function apiMemoriesClear(): void {
+        $uid = require_login();
+        csrf_require();
+        json_ok(['removed' => Memory::deleteAll($uid)]);
+    }
+
+    // ---- Conversations -----------------------------------------------------
+
+    public function apiConvList(): void {
+        $uid = require_login();
+        json_ok(['conversations' => Conversation::listForUser($uid)]);
+    }
+
+    public function apiConvCreate(): void {
+        $uid = require_login();
+        csrf_require();
+        $body  = self::readJson();
+        $title = trim((string)($body['title'] ?? 'New conversation'));
+        $conv  = Conversation::create($uid, $title);
+        json_ok(['conversation' => $conv]);
+    }
+
+    public function apiConvShow(string $id): void {
+        $uid = require_login();
+        $conv = Conversation::findById($uid, (int)$id);
+        if (!$conv) json_err('not_found', 404);
+        $msgs = Conversation::messages((int)$id);
+        json_ok(['conversation' => $conv, 'messages' => $msgs]);
+    }
+
+    public function apiConvRename(string $id): void {
+        $uid = require_login();
+        csrf_require();
+        $body = self::readJson();
+        $conv = Conversation::rename($uid, (int)$id, (string)($body['title'] ?? ''));
+        if (!$conv) json_err('not_found', 404);
+        json_ok(['conversation' => $conv]);
+    }
+
+    public function apiConvDelete(string $id): void {
+        $uid = require_login();
+        csrf_require();
+        $ok = Conversation::delete($uid, (int)$id);
+        json_ok(['deleted' => $ok]);
+    }
+
+    // ---- Cooking log -------------------------------------------------------
+
+    public function apiCookingList(): void {
+        $uid = require_login();
+        json_ok([
+            'recent'     => CookingLog::recent($uid, 30),
+            'highlights' => CookingLog::highlights($uid, 8),
+        ]);
+    }
+
+    public function apiCookingCreate(): void {
+        $uid = require_login();
+        csrf_require();
+        $body = self::readJson();
+        $title = trim((string)($body['recipe_title'] ?? ''));
+        $rid   = isset($body['recipe_id']) && $body['recipe_id'] !== '' ? (int)$body['recipe_id'] : null;
+        if ($title === '' && !$rid) json_err('recipe_required', 422);
+        $row = CookingLog::add(
+            $uid,
+            $rid,
+            $title,
+            isset($body['rating']) && $body['rating'] !== '' ? (int)$body['rating'] : null,
+            isset($body['notes']) ? (string)$body['notes'] : null
+        );
+        json_ok(['entry' => $row]);
+    }
+
+    public function apiCookingDelete(string $id): void {
+        $uid = require_login();
+        csrf_require();
+        $ok = CookingLog::delete($uid, (int)$id);
+        json_ok(['deleted' => $ok]);
+    }
+
+    // ---- Bulk ingredient parser -------------------------------------------
+
     public function apiParseIngredients(): void {
         $uid  = require_login();
         csrf_require();
@@ -96,11 +229,8 @@ class AiController {
         ]);
     }
 
-    /**
-     * POST /api/ai/parse-recipe
-     * Body: { text: "raw recipe text or URL paste" }
-     * Returns a fully-structured recipe payload ready for the editor.
-     */
+    // ---- Recipe parser -----------------------------------------------------
+
     public function apiParseRecipe(): void {
         require_login();
         csrf_require();
@@ -141,12 +271,8 @@ class AiController {
         json_ok(['recipe' => $parsed, 'usage' => $resp['usage'] ?? null]);
     }
 
-    /**
-     * POST /api/ai/recipe-suggestions
-     * Body: { mode?: "pantry"|"new"|"weeknight", note?: string }
-     * Returns an array of NEW recipe ideas (not in the user's library) tailored
-     * to the pantry / preferences.
-     */
+    // ---- Recipe suggestions -----------------------------------------------
+
     public function apiRecipeSuggestions(): void {
         $uid = require_login();
         csrf_require();
@@ -156,18 +282,21 @@ class AiController {
         $mode = (string)($body['mode'] ?? 'pantry');
         $note = trim((string)($body['note'] ?? ''));
 
-        $context = ai_kitchen_context($uid);
+        $context = ai_full_context($uid);
 
         $modeHint = match ($mode) {
-            'new'       => 'Suggest fresh, NEW recipe ideas the user has never made (avoid titles already in their library). Variety: try cuisines they don\'t have yet.',
+            'new'       => 'Suggest fresh, NEW recipe ideas the user has never made (avoid titles already in their library or cooking history). Variety: try cuisines they don\'t have yet.',
             'weeknight' => 'Suggest fast 30-minute weeknight dinners using mostly in-stock items.',
+            'favorite' => 'Suggest meals similar to their highest-rated cooked dishes — riff on flavors and techniques they already love.',
             default     => 'Suggest meals that use mostly the in-stock pantry items. List up to 3 missing ingredients per recipe if needed.',
         };
 
-        $system = "You are a culinary brain for a personal cookbook app.\n"
+        $system = "You are a culinary brain for a personal cookbook app. "
+                . "Strictly respect the user's remembered preferences (diet, allergies, dislikes).\n\n"
                 . $context . "\n\n"
                 . "When asked for suggestions, respond ONLY with JSON of shape:\n"
-                . "  {\"suggestions\": [{title, cuisine, glyph, time_minutes, difficulty, summary, missing_ingredients: [string]}]}\n"
+                . "  {\"suggestions\": [{title, cuisine, glyph, time_minutes, difficulty, summary, missing_ingredients: [string], reason: string}]}\n"
+                . "The `reason` should be ONE short sentence tying the idea to the user's known preferences or pantry. "
                 . "Provide 5–8 ideas. Glyph is a single emoji. Keep titles concise.";
 
         $userMsg = $modeHint;
@@ -188,11 +317,6 @@ class AiController {
         json_ok(['suggestions' => $items, 'usage' => $resp['usage'] ?? null]);
     }
 
-    /**
-     * POST /api/ai/recipe-from-idea
-     * Body: { title: "idea title", note?: string }
-     * Returns a fully-fleshed recipe payload ready to save (same shape as parse-recipe).
-     */
     public function apiRecipeFromIdea(): void {
         $uid = require_login();
         csrf_require();
@@ -204,8 +328,9 @@ class AiController {
         if ($title === '') json_err('title_required', 422);
 
         $aisles = implode(', ', AISLES);
-        $context = ai_kitchen_context($uid);
-        $system = "You write reliable recipes for a home cook.\n"
+        $context = ai_full_context($uid);
+        $system = "You write reliable recipes for a home cook. "
+                . "Strictly respect their dietary needs and allergies.\n\n"
                 . $context . "\n\n"
                 . "Given a recipe idea, return the full recipe as JSON with keys: "
                 . "title, cuisine, summary, time_minutes (int), servings (int), "
@@ -231,63 +356,174 @@ class AiController {
         json_ok(['recipe' => $parsed, 'usage' => $resp['usage'] ?? null]);
     }
 
-    /**
-     * POST /api/ai/chat
-     * Body: { messages: [{role, content}], page?: string }
-     * General-purpose conversational endpoint. Knows the user's pantry + library.
-     */
+    // ---- Chat (persistent + tool use + memory extraction) -----------------
+
     public function apiChat(): void {
         $uid = require_login();
         csrf_require();
         if (!ai_enabled()) json_err('ai_disabled', 503);
 
         $body = self::readJson();
-        $messages = $body['messages'] ?? [];
-        $page = (string)($body['page'] ?? '');
-        if (!is_array($messages) || !$messages) json_err('messages_required', 422);
+        $message = trim((string)($body['message'] ?? ''));
+        $page    = (string)($body['page'] ?? '');
+        $convId  = isset($body['conversation_id']) && $body['conversation_id'] !== ''
+            ? (int)$body['conversation_id'] : null;
+        if ($message === '') json_err('message_required', 422);
+        if (mb_strlen($message) > 6000) $message = mb_substr($message, 0, 6000);
 
-        $clean = [];
-        foreach ($messages as $m) {
-            if (!is_array($m)) continue;
-            $role = $m['role'] ?? '';
-            $content = $m['content'] ?? '';
-            if (!in_array($role, ['user', 'assistant'], true)) continue;
-            if (!is_string($content)) continue;
-            $content = mb_substr($content, 0, 4000);
-            if ($content === '') continue;
-            $clean[] = ['role' => $role, 'content' => $content];
+        // Resolve / create conversation.
+        if ($convId) {
+            $conv = Conversation::findById($uid, $convId);
+            if (!$conv) json_err('not_found', 404);
+        } else {
+            $conv = Conversation::create($uid, mb_substr($message, 0, 60));
+            $convId = (int)$conv['id'];
         }
-        if (!$clean) json_err('messages_required', 422);
-        $clean = array_slice($clean, -20);
 
-        $context = ai_kitchen_context($uid);
-        $system  = "You are the in-app assistant for a personal recipe + pantry app.\n"
+        // Save user message.
+        Conversation::addMessage($convId, 'user', $message);
+
+        // Build messages list for the model from the conversation history.
+        $history = Conversation::messages($convId, 30);
+        $apiMessages = [];
+        foreach ($history as $m) {
+            if (!in_array($m['role'], ['user', 'assistant'], true)) continue;
+            $apiMessages[] = ['role' => $m['role'], 'content' => $m['content']];
+        }
+
+        $context = ai_full_context($uid);
+        $system  = "You are the in-app assistant for a personal recipe + pantry app. "
+                 . "You have persistent memory of the user's preferences and cooking history.\n\n"
                  . $context . "\n\n"
-                 . "Be concise, friendly, and practical. When the user asks what to cook, "
-                 . "prefer recipes already in their library or things they can make from "
-                 . "in-stock items. When they ask to add things, give a clear step-by-step. "
-                 . "When listing recipes use a short bulleted format. "
-                 . "If they're on the '$page' page, gear advice toward that view.";
+                 . "Behaviors:\n"
+                 . "- Be concise, warm, and practical. Bullet lists for recipe options.\n"
+                 . "- When you learn a stable preference (diet, allergy, dislike, equipment, schedule, household), call the `remember_preference` tool. Don't ask permission — just remember it. Skip transient state.\n"
+                 . "- When the user explicitly tells you to forget something, call `forget_preference` with the matching memory id.\n"
+                 . "- When they ask to add to shopping or set a meal-plan day, use the matching tool.\n"
+                 . "- When they say they cooked / made / tried a dish, call `log_cooked_recipe`.\n"
+                 . "- Prefer recipes already in the library when relevant.\n"
+                 . ($page ? "- The user is on the '$page' page; gear advice toward that view.\n" : '');
 
-        try {
-            $resp = ai_call($clean, [
-                'system' => $system,
-                'max_tokens' => 1200,
-                'temperature' => 0.6,
-            ]);
-        } catch (AiException $e) {
-            json_err($e->getMessage(), 502);
+        $tools = ai_chat_tools();
+
+        // Tool-use loop. Allow up to 4 hops so the model can save a memory,
+        // add a shopping item, etc., before producing the final reply.
+        $totalUsage = ['input_tokens' => 0, 'output_tokens' => 0];
+        $actions = [];
+        $finalText = '';
+
+        for ($hop = 0; $hop < 5; $hop++) {
+            try {
+                $resp = ai_call($apiMessages, [
+                    'system' => $system,
+                    'tools'  => $tools,
+                    'max_tokens' => 1400,
+                    'temperature' => 0.6,
+                ]);
+            } catch (AiException $e) {
+                Conversation::addMessage($convId, 'assistant', '⚠️ ' . $e->getMessage());
+                json_err($e->getMessage(), 502);
+            }
+
+            $u = ai_usage($resp);
+            $totalUsage['input_tokens']  += $u['input_tokens'];
+            $totalUsage['output_tokens'] += $u['output_tokens'];
+
+            $stop = $resp['stop_reason'] ?? '';
+            $toolUses = ai_tool_uses($resp);
+
+            // Always preserve the assistant turn so tool_result blocks line up.
+            $apiMessages[] = ['role' => 'assistant', 'content' => $resp['content'] ?? []];
+
+            if ($stop !== 'tool_use' || !$toolUses) {
+                $finalText = ai_text($resp);
+                break;
+            }
+
+            // Execute tools and feed results back.
+            $resultBlocks = [];
+            foreach ($toolUses as $tu) {
+                $name  = (string)($tu['name'] ?? '');
+                $input = is_array($tu['input'] ?? null) ? $tu['input'] : [];
+                $resultPayload = $this->executeTool($uid, $name, $input);
+                $actions[] = ['tool' => $name, 'input' => $input, 'result' => $resultPayload];
+                $resultBlocks[] = [
+                    'type'        => 'tool_result',
+                    'tool_use_id' => $tu['id'] ?? '',
+                    'content'     => json_encode($resultPayload, JSON_UNESCAPED_UNICODE),
+                ];
+            }
+            $apiMessages[] = ['role' => 'user', 'content' => $resultBlocks];
         }
+
+        if ($finalText === '') $finalText = '(no reply)';
+        Conversation::addMessage($convId, 'assistant', $finalText, $totalUsage['input_tokens'], $totalUsage['output_tokens']);
+        Conversation::touch($uid, $convId);
+
         json_ok([
-            'reply' => ai_text($resp),
-            'usage' => $resp['usage'] ?? null,
+            'reply'           => $finalText,
+            'conversation_id' => $convId,
+            'actions'         => $actions,
+            'usage'           => $totalUsage,
         ]);
     }
 
-    /**
-     * POST /api/ai/categorize
-     * Body: { name: "..." }  → { category: "..." }
-     */
+    /** Execute a tool the chat model requested. Always returns a JSON-serialisable array. */
+    private function executeTool(int $uid, string $name, array $input): array {
+        try {
+            switch ($name) {
+                case 'remember_preference':
+                    $row = Memory::add(
+                        $uid,
+                        (string)($input['fact'] ?? ''),
+                        (string)($input['category'] ?? 'other'),
+                        'assistant',
+                        isset($input['weight']) ? (int)$input['weight'] : 6
+                    );
+                    return $row
+                        ? ['ok' => true, 'memory_id' => (int)$row['id'], 'fact' => $row['fact']]
+                        : ['ok' => false, 'error' => 'invalid_fact'];
+
+                case 'forget_preference':
+                    $ok = Memory::delete($uid, (int)($input['id'] ?? 0));
+                    return ['ok' => $ok];
+
+                case 'add_to_shopping_list':
+                    $row = Shopping::add($uid, [
+                        'name' => (string)($input['name'] ?? ''),
+                        'qty'  => $input['qty']  ?? null,
+                        'unit' => $input['unit'] ?? '',
+                        'source_label' => 'assistant',
+                    ]);
+                    return ['ok' => true, 'shopping_id' => (int)$row['id']];
+
+                case 'set_meal_plan_day':
+                    $day = (string)($input['day'] ?? '');
+                    $rid = (int)($input['recipe_id'] ?? 0);
+                    if (!in_array($day, PLAN_DAYS, true)) return ['ok' => false, 'error' => 'bad_day'];
+                    $r = Recipe::findById($uid, $rid);
+                    if (!$r) return ['ok' => false, 'error' => 'recipe_not_found'];
+                    Plan::setDay($uid, $day, $rid);
+                    return ['ok' => true, 'day' => $day, 'recipe_id' => $rid];
+
+                case 'log_cooked_recipe':
+                    $row = CookingLog::add(
+                        $uid,
+                        isset($input['recipe_id']) && $input['recipe_id'] !== '' ? (int)$input['recipe_id'] : null,
+                        (string)($input['recipe_title'] ?? ''),
+                        isset($input['rating']) ? (int)$input['rating'] : null,
+                        isset($input['notes']) ? (string)$input['notes'] : null
+                    );
+                    return ['ok' => true, 'log_id' => (int)$row['id']];
+            }
+        } catch (Throwable $e) {
+            return ['ok' => false, 'error' => $e->getMessage()];
+        }
+        return ['ok' => false, 'error' => 'unknown_tool'];
+    }
+
+    // ---- Categorize (single ingredient) -----------------------------------
+
     public function apiCategorize(): void {
         require_login();
         csrf_require();
@@ -317,11 +553,8 @@ class AiController {
         json_ok(['category' => $cat]);
     }
 
-    /**
-     * POST /api/ai/plan-week
-     * Body: { note?: string, days?: ["Mon",..] }
-     * Picks recipes (from the user's library when possible) for each day of the week.
-     */
+    // ---- Plan a week ------------------------------------------------------
+
     public function apiPlanWeek(): void {
         $uid = require_login();
         csrf_require();
@@ -333,13 +566,15 @@ class AiController {
         if (!is_array($days) || !$days) $days = PLAN_DAYS;
         $days = array_values(array_intersect($days, PLAN_DAYS));
 
-        $context = ai_kitchen_context($uid);
+        $context = ai_full_context($uid);
         $daysList = implode(', ', $days);
-        $system = "You build weekly meal plans for a home cook.\n"
+        $system = "You build weekly meal plans for a home cook. "
+                . "Strictly respect their dietary needs and allergies.\n\n"
                 . $context . "\n\n"
                 . "Choose ONE meal for each requested day. Prefer recipes already in the "
                 . "user's library when the title matches; otherwise propose a NEW idea. "
-                . "Output ONLY JSON: {plan: {Mon: {title, summary, from_library (bool), glyph}, ...}}";
+                . "Output ONLY JSON: {plan: {Mon: {title, summary, from_library (bool), glyph, reason}, ...}} "
+                . "Each `reason` is one short sentence tying the choice to a known preference or pantry item.";
 
         $userMsg = "Days: $daysList. Build a balanced week (vary cuisines, mix quick and slow).";
         if ($note !== '') $userMsg .= "\n\nUser note: $note";
@@ -356,6 +591,81 @@ class AiController {
         $plan = (is_array($parsed) && isset($parsed['plan']) && is_array($parsed['plan']))
             ? $parsed['plan'] : [];
         json_ok(['plan' => $plan, 'usage' => $resp['usage'] ?? null]);
+    }
+
+    // ---- Memory extraction (analyse a conversation) -----------------------
+
+    /**
+     * POST /api/ai/extract-memories
+     * Body: { conversation_id?: int, text?: string }
+     * Pulls durable preference facts out of the recent conversation (or a
+     * pasted text block) and stores them as ai_memories rows. Returns the
+     * list of memories added.
+     */
+    public function apiExtractMemories(): void {
+        $uid = require_login();
+        csrf_require();
+        if (!ai_enabled()) json_err('ai_disabled', 503);
+
+        $body = self::readJson();
+        $convId = isset($body['conversation_id']) && $body['conversation_id'] !== ''
+            ? (int)$body['conversation_id'] : null;
+        $text = trim((string)($body['text'] ?? ''));
+
+        if ($convId) {
+            $conv = Conversation::findById($uid, $convId);
+            if (!$conv) json_err('not_found', 404);
+            $msgs = Conversation::messages($convId, 40);
+            $lines = [];
+            foreach ($msgs as $m) {
+                $lines[] = strtoupper($m['role']) . ': ' . $m['content'];
+            }
+            $text = implode("\n", $lines);
+        }
+        if ($text === '') json_err('text_required', 422);
+
+        $cats = implode('|', Memory::CATEGORIES);
+        $existing = Memory::listForUser($uid, 60);
+        $existingFacts = array_map(fn($m) => $m['fact'], $existing);
+        $existingBlock = $existingFacts
+            ? "Already-known memories (do not duplicate):\n- " . implode("\n- ", array_slice($existingFacts, 0, 60))
+            : 'No existing memories yet.';
+
+        $system = "You extract durable user preferences from a conversation. "
+                . "Output ONLY JSON of shape: {\"memories\": [{\"category\": \"$cats\", \"fact\": \"...\", \"weight\": 1-10}]}.\n"
+                . "Rules:\n"
+                . "- Only include STABLE preferences (diet, allergies, dislikes, household, equipment, skill, goals, schedule, favorite cuisines).\n"
+                . "- Skip transient state ('wants pasta tonight').\n"
+                . "- Each fact: short, durable statement, lowercase if natural.\n"
+                . "- Weight 8–10 = strong (allergies, hard dietary rules); 4–7 = preference; 1–3 = mild.\n"
+                . "- Return [] if there is nothing new.\n\n"
+                . $existingBlock;
+
+        try {
+            $resp = ai_call(
+                [['role' => 'user', 'content' => $text]],
+                ['system' => $system, 'max_tokens' => 800, 'temperature' => 0.0]
+            );
+        } catch (AiException $e) {
+            json_err($e->getMessage(), 502);
+        }
+        $parsed = ai_extract_json(ai_text($resp));
+        $list = (is_array($parsed) && isset($parsed['memories']) && is_array($parsed['memories']))
+            ? $parsed['memories'] : [];
+
+        $added = [];
+        foreach ($list as $m) {
+            if (!is_array($m)) continue;
+            $row = Memory::add(
+                $uid,
+                (string)($m['fact'] ?? ''),
+                (string)($m['category'] ?? 'other'),
+                'assistant',
+                isset($m['weight']) ? (int)$m['weight'] : 5
+            );
+            if ($row) $added[] = $row;
+        }
+        json_ok(['added' => $added, 'count' => count($added)]);
     }
 
     private static function readJson(): array {

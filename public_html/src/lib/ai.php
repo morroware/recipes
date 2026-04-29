@@ -1,6 +1,7 @@
 <?php
 // public_html/src/lib/ai.php
-// Thin wrapper around the Anthropic Messages API.
+// Wrapper around the Anthropic Messages API + memory-aware context builders.
+//
 // Reads the API key from $CONFIG['anthropic_api_key'] (config.php) or the
 // ANTHROPIC_API_KEY env var. Uses Claude Sonnet 4.6 by default with prompt
 // caching on the system block so repeat requests within a 5-minute window
@@ -108,6 +109,17 @@ function ai_text(array $response): string {
     return trim(implode("\n", $parts));
 }
 
+/** Return all tool_use blocks from a Messages API response. */
+function ai_tool_uses(array $response): array {
+    $uses = [];
+    foreach (($response['content'] ?? []) as $block) {
+        if (($block['type'] ?? '') === 'tool_use') {
+            $uses[] = $block;
+        }
+    }
+    return $uses;
+}
+
 /**
  * Try to pull a JSON object/array out of a model response that may have
  * surrounding prose or fenced code blocks.
@@ -190,4 +202,174 @@ function ai_kitchen_context(int $user_id): string {
         $lines[] = '  …and ' . (count($recipes) - 40) . ' more.';
     }
     return implode("\n", $lines);
+}
+
+/** Compact "what we know about this user" block from ai_memories. */
+function ai_profile_context(int $user_id): string {
+    if (!class_exists('Memory')) return '';
+    try {
+        $grouped = Memory::groupedForContext($user_id);
+    } catch (Throwable $e) {
+        return '';
+    }
+    if (!$grouped) return '';
+
+    $labels = [
+        'diet'      => 'Dietary',
+        'allergy'   => 'Allergies',
+        'dislike'   => 'Dislikes',
+        'like'      => 'Likes',
+        'cuisine'   => 'Favorite cuisines',
+        'household' => 'Household',
+        'equipment' => 'Equipment',
+        'skill'     => 'Skill / experience',
+        'schedule'  => 'Schedule',
+        'goal'      => 'Goals',
+        'other'     => 'Other notes',
+    ];
+    $lines = ['# About this user (remembered preferences)'];
+    foreach ($labels as $cat => $label) {
+        if (empty($grouped[$cat])) continue;
+        $facts = array_slice(array_unique($grouped[$cat]), 0, 12);
+        $lines[] = '- ' . $label . ': ' . implode('; ', $facts);
+    }
+    return count($lines) > 1 ? implode("\n", $lines) : '';
+}
+
+/** Recent cooking history block. */
+function ai_cooking_context(int $user_id): string {
+    if (!class_exists('CookingLog')) return '';
+    try {
+        $h = CookingLog::highlights($user_id, 6);
+    } catch (Throwable $e) {
+        return '';
+    }
+    $loved  = $h['loved']  ?? [];
+    $recent = $h['recent'] ?? [];
+    if (!$loved && !$recent) return '';
+
+    $lines = ['# Cooking history'];
+    if ($recent) {
+        $lines[] = 'Recently cooked:';
+        foreach (array_slice($recent, 0, 6) as $r) {
+            $rating = $r['rating'] ? str_repeat('★', (int)$r['rating']) : '';
+            $lines[] = sprintf('  - %s (%s)%s',
+                $r['recipe_title'] ?: 'untitled',
+                substr((string)$r['cooked_at'], 0, 10),
+                $rating ? ' ' . $rating : ''
+            );
+        }
+    }
+    if ($loved) {
+        $lines[] = 'Highest-rated dishes:';
+        foreach (array_slice($loved, 0, 5) as $r) {
+            $lines[] = sprintf('  - %s (avg %.1f over %d cooks)',
+                $r['recipe_title'] ?: 'untitled',
+                (float)$r['avg_rating'],
+                (int)$r['times']
+            );
+        }
+    }
+    return implode("\n", $lines);
+}
+
+/**
+ * Full context: profile + cooking + kitchen. Used by chat, suggestions,
+ * planning, recipe-from-idea — anything that benefits from personalization.
+ */
+function ai_full_context(int $user_id): string {
+    $parts = array_filter([
+        ai_profile_context($user_id),
+        ai_cooking_context($user_id),
+        ai_kitchen_context($user_id),
+    ], fn($s) => trim((string)$s) !== '');
+    return implode("\n\n", $parts);
+}
+
+/**
+ * Tool definitions advertised to the chat model so it can take real actions
+ * during a conversation (save a memory, add to shopping list, log a cook,
+ * etc.). The controller is responsible for executing each tool_use block.
+ */
+function ai_chat_tools(): array {
+    return [
+        [
+            'name'        => 'remember_preference',
+            'description' => 'Save a stable fact about the user so it influences future suggestions. Use for dietary needs, allergies, dislikes, favorite cuisines, equipment, household size, skill, goals, etc. Do NOT save transient state like "wants tacos tonight".',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'category' => [
+                        'type' => 'string',
+                        'enum' => Memory::CATEGORIES,
+                        'description' => 'Bucket for the fact.',
+                    ],
+                    'fact'   => ['type' => 'string', 'description' => 'Short, durable statement (e.g. "vegetarian", "loves Thai food", "no cilantro", "has air fryer").'],
+                    'weight' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 10, 'description' => 'How important the fact is. Default 5.'],
+                ],
+                'required' => ['category', 'fact'],
+            ],
+        ],
+        [
+            'name'        => 'forget_preference',
+            'description' => 'Remove a stored memory by id when the user says it is wrong or no longer applies.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id' => ['type' => 'integer', 'description' => 'ai_memories.id to delete.'],
+                ],
+                'required' => ['id'],
+            ],
+        ],
+        [
+            'name'        => 'add_to_shopping_list',
+            'description' => 'Add an item to the user\'s shopping list.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'name' => ['type' => 'string'],
+                    'qty'  => ['type' => 'string', 'description' => 'Optional quantity, e.g. "2".'],
+                    'unit' => ['type' => 'string', 'description' => 'Optional unit, e.g. "lb".'],
+                ],
+                'required' => ['name'],
+            ],
+        ],
+        [
+            'name'        => 'set_meal_plan_day',
+            'description' => 'Assign one of the user\'s recipes to a specific day of the meal plan.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'day'       => ['type' => 'string', 'enum' => ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']],
+                    'recipe_id' => ['type' => 'integer'],
+                ],
+                'required' => ['day', 'recipe_id'],
+            ],
+        ],
+        [
+            'name'        => 'log_cooked_recipe',
+            'description' => 'Record that the user cooked a recipe (optionally with a 1–5 rating + notes). Call when the user says they made/cooked/tried a dish.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'recipe_id'    => ['type' => 'integer', 'description' => 'Optional id of an existing library recipe.'],
+                    'recipe_title' => ['type' => 'string'],
+                    'rating'       => ['type' => 'integer', 'minimum' => 1, 'maximum' => 5],
+                    'notes'        => ['type' => 'string'],
+                ],
+                'required' => ['recipe_title'],
+            ],
+        ],
+    ];
+}
+
+/** Token usage tally for a response (for surfacing to the UI). */
+function ai_usage(array $response): array {
+    $u = $response['usage'] ?? [];
+    return [
+        'input_tokens'              => (int)($u['input_tokens']               ?? 0),
+        'output_tokens'             => (int)($u['output_tokens']              ?? 0),
+        'cache_creation_input_tokens' => (int)($u['cache_creation_input_tokens'] ?? 0),
+        'cache_read_input_tokens'   => (int)($u['cache_read_input_tokens']    ?? 0),
+    ];
 }

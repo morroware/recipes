@@ -26,15 +26,38 @@ Production source for the Personal Recipe Book app (vanilla PHP + MySQL).
 Setting `anthropic_api_key` in `config.php` (or the `ANTHROPIC_API_KEY` env
 var) enables Claude-powered features:
 
-- ✨ **Bulk pantry add** — paste any list / recipe / fridge dump and Claude
-  parses it into pantry items (with categories) in one click.
-- 🍳 **What can I make?** — Claude suggests new recipes tailored to your
-  in-stock pantry; click any idea to have it fleshed out into a full,
-  saveable recipe.
-- 📋 **Import recipe** — paste raw recipe text and Claude structures it
-  (title, ingredients, steps, tags, glyph, color) directly into the editor.
-- 💬 **In-app chat** — the floating ✨ button on every page opens a
-  kitchen-aware assistant that knows your pantry and recipe library.
+- ✨ **Full chat at `/chat`** — a dedicated page with persistent
+  conversations, an editable list of remembered preferences, and a quick
+  view of recent cooks. Claude knows your pantry, library, cooking history,
+  and everything you've told it.
+- 🧠 **Persistent memory** — the assistant remembers stable preferences
+  (diet, allergies, dislikes, household, equipment, schedule, goals) in the
+  `ai_memories` table. You can edit them by hand, or click "🧠 Save
+  preferences" to extract durable facts from the current chat.
+- 🛠️ **Tool use** — during chat the assistant can save memories, add
+  shopping items, set meal-plan days, and log a cooked recipe — without
+  leaving the conversation.
+- 🍽️ **Cooking log** — the "🍽️ I made this" button on every recipe records
+  a cook (optionally with a 1–5 rating). The assistant uses your highest-
+  rated dishes when suggesting new ideas.
+- ✨ **Quick assist (floating panel)** — the ✨ button on every page opens
+  a quick-chat + bulk pantry add + recipe suggestions + recipe import
+  panel.
+- 🍳 **Personalized suggestions** — recipe suggestions, the "build me a
+  week" planner, and the "flesh out this idea" recipe builder all read your
+  memories and cooking history, not just your pantry.
+- 📋 **Bulk pantry add** & **Import recipe** — paste raw text; Claude
+  parses ingredients or full recipes and writes them into the right tables.
 
-The default model is `claude-sonnet-4-6`. The system prompt is sent with
+### Database upgrade
+
+Existing installs need the new AI tables. Run the additive migration:
+
+```sh
+mysql -u <user> -p <db> < public_html/db/migrations/001_ai_memory.sql
+```
+
+Fresh installs get them automatically from `public_html/db/schema.sql`.
+
+The default model is `claude-sonnet-4-6`. System prompts are sent with
 ephemeral prompt caching so back-to-back requests reuse cached context.

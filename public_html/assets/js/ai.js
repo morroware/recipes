@@ -1,12 +1,12 @@
 // public_html/assets/js/ai.js
-// Floating AI assistant: chat + bulk pantry add + recipe suggestions + recipe import.
-// Shared across every authenticated page.
+// Floating AI quick-assist panel: a quick chat + bulk pantry add + recipe
+// suggestions + recipe import. The full chat experience lives at /chat.
 
 import { apiFetch, toast, appUrl } from './app.js';
 
 let aiEnabled = null;
 let panelEl = null;
-let chatHistory = [];
+let chatConversationId = null;
 
 function pageContext() {
   const el = document.querySelector('[data-page]');
@@ -45,8 +45,9 @@ function buildPanel() {
       <div class="ai-panel-body">
 
         <div class="ai-pane" data-pane="chat">
-          <div class="muted" style="font-size:12px;">
-            Ask anything. I know your pantry and recipe library.
+          <div class="muted" style="font-size:12px; display:flex; justify-content:space-between; align-items:center;">
+            <span>Quick chat. I remember your preferences.</span>
+            <a class="btn btn-sm" href="${appUrl('/chat')}">Open full chat ↗</a>
           </div>
           <div class="ai-chat-log" data-ai="chatlog"></div>
           <form data-ai="chat-form" style="display:flex; gap:8px; margin-top:8px;">
@@ -137,18 +138,29 @@ function wirePanel(panel) {
     if (!text) return;
     input.value = '';
     appendChat('user', text);
-    chatHistory.push({ role: 'user', content: text });
     const busyEl = appendChat('assistant', '…thinking');
     busyEl.classList.add('ai-busy');
     busyEl.textContent = 'thinking…';
     try {
       const { data } = await apiFetch('/api/ai/chat', {
         method: 'POST',
-        body: JSON.stringify({ messages: chatHistory, page: pageContext() }),
+        body: JSON.stringify({
+          conversation_id: chatConversationId,
+          message: text,
+          page: pageContext(),
+        }),
       });
+      chatConversationId = data.conversation_id || chatConversationId;
       busyEl.classList.remove('ai-busy');
       busyEl.textContent = data.reply || '(no reply)';
-      chatHistory.push({ role: 'assistant', content: data.reply || '' });
+      if (Array.isArray(data.actions) && data.actions.length) {
+        const note = document.createElement('div');
+        note.className = 'ai-chat-actions';
+        note.textContent = data.actions.map(a => describeAction(a)).join(' · ');
+        const log = panelEl.querySelector('[data-ai="chatlog"]');
+        log.appendChild(note);
+        log.scrollTop = log.scrollHeight;
+      }
     } catch (e) {
       busyEl.classList.remove('ai-busy');
       busyEl.classList.add('error');
@@ -266,6 +278,18 @@ async function bulkSubmit(panel, commit) {
     }
   } catch (e) {
     out.textContent = 'Error: ' + e.message;
+  }
+}
+
+function describeAction(a) {
+  const i = (a && a.input) || {};
+  switch (a && a.tool) {
+    case 'remember_preference':  return `🧠 saved: ${i.fact}`;
+    case 'forget_preference':    return `🗑️ forgot #${i.id}`;
+    case 'add_to_shopping_list': return `🛒 added: ${[i.qty, i.unit, i.name].filter(Boolean).join(' ')}`;
+    case 'set_meal_plan_day':    return `📅 ${i.day}: recipe #${i.recipe_id}`;
+    case 'log_cooked_recipe':    return `🍽️ logged: ${i.recipe_title}`;
+    default: return `↺ ${a && a.tool}`;
   }
 }
 

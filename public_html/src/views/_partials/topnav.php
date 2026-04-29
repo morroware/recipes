@@ -18,8 +18,9 @@
     <a href="<?= h(url_for('/shopping')) ?>"  <?= $active === 'shopping'  ? 'aria-current="page"' : '' ?>>🛒 Shopping</a>
     <a href="<?= h(url_for('/favorites')) ?>" <?= $active === 'favorites' ? 'aria-current="page"' : '' ?>>♥ Favorites</a>
     <a href="<?= h(url_for('/print')) ?>"     <?= $active === 'print'     ? 'aria-current="page"' : '' ?>>🖨️ Print</a>
+    <a href="<?= h(url_for('/chat')) ?>"      <?= $active === 'chat'      ? 'aria-current="page"' : '' ?>>✨ Chat</a>
     <a href="<?= h(url_for('/add')) ?>"       <?= $active === 'add'       ? 'aria-current="page"' : '' ?>>＋ Add</a>
-    <button type="button" data-js="ai-fab-trigger">✨ AI assistant</button>
+    <button type="button" data-js="ai-fab-trigger">✨ Quick assist</button>
     <form method="post" action="<?= h(url_for('/logout')) ?>">
       <?= csrf_field() ?>
       <button type="submit" style="width:100%;">Sign out</button>
@@ -36,6 +37,7 @@
   <a class="btn btn-sm" href="<?= h(url_for('/shopping')) ?>"  <?= $active === 'shopping'  ? 'aria-current="page"' : '' ?>>🛒 Shopping</a>
   <a class="btn btn-sm" href="<?= h(url_for('/favorites')) ?>" <?= $active === 'favorites' ? 'aria-current="page"' : '' ?>>♥ Favorites</a>
   <a class="btn btn-sm" href="<?= h(url_for('/print')) ?>"     <?= $active === 'print'     ? 'aria-current="page"' : '' ?>>🖨️ Print</a>
+  <a class="btn btn-sm btn-lilac" href="<?= h(url_for('/chat')) ?>" <?= $active === 'chat' ? 'aria-current="page"' : '' ?>>✨ Chat</a>
   <a class="btn btn-sm btn-mint" href="<?= h(url_for('/add')) ?>" <?= $active === 'add'    ? 'aria-current="page"' : '' ?>>＋ Add</a>
   <form method="post" action="<?= h(url_for('/logout')) ?>" style="display: inline;">
     <?= csrf_field() ?>

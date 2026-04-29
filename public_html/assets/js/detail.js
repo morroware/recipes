@@ -68,7 +68,33 @@ if (root) {
     if (t.dataset.action === 'cook-close')    { closeCookMode(); }
     if (t.dataset.action === 'cook-prev')     { setCookStep(cookStep - 1); }
     if (t.dataset.action === 'cook-next')     { setCookStep(cookStep + 1); }
+    if (t.dataset.action === 'log-cooked')    { logCooked(t); }
   });
+
+  // ---- "I made this" — record a cook + bump pantry usage --------------------
+  async function logCooked(btn) {
+    const id = btn.dataset.recipeId;
+    const title = btn.dataset.recipeTitle || '';
+    const ratingRaw = prompt('How was it? Rate 1–5 (or leave blank to skip).', '');
+    if (ratingRaw === null) return;
+    let rating = parseInt(ratingRaw, 10);
+    if (!Number.isFinite(rating) || rating < 1 || rating > 5) rating = null;
+    const notes = prompt('Quick notes? (optional)', '') || null;
+    btn.disabled = true;
+    try {
+      await apiFetch('/api/cooking-log', {
+        method: 'POST',
+        body: JSON.stringify({ recipe_id: id ? Number(id) : null, recipe_title: title, rating, notes }),
+      });
+      toast('🍽️ Logged. The assistant will remember.');
+      btn.classList.add('btn-mint');
+    } catch {
+      // toast already shown
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
 
   // ---- cooking-mode dialog -------------------------------------------------
   const dialog = root.querySelector('[data-bind="cook-dialog"]');
