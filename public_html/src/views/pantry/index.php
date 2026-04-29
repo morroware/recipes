@@ -23,9 +23,9 @@
   </div>
 
   <div class="row" style="margin-bottom: 24px; gap: 6px;" data-js="pantry-mode">
-    <a href="/pantry"
+    <a href="<?= h(url_for('/pantry')) ?>"
        class="filter-chip <?= $mode === 'pantry' ? 'active' : '' ?>">📦 Inventory &amp; suggestions</a>
-    <a href="/pantry?mode=tag"
+    <a href="<?= h(url_for('/pantry')) ?>?mode=tag"
        class="filter-chip <?= $mode === 'tag' ? 'active' : '' ?>">🔎 Find by ingredient</a>
   </div>
 
@@ -115,7 +115,7 @@
           </div>
         <?php else: ?>
           <?php foreach ($suggestions as $s): $r = $s['recipe']; $colors = STICKER_COLORS[$r['color']] ?? STICKER_COLORS['mint']; ?>
-            <a class="suggest-card" href="/recipes/<?= (int)$r['id'] ?>" style="text-decoration: none; color: inherit;">
+            <a class="suggest-card" href="<?= h(url_for('/recipes/' . (int)$r['id'])) ?>" style="text-decoration: none; color: inherit;">
               <div class="suggest-card-glyph"
                    style="<?= !empty($r['photo_url'])
                      ? 'background-image: url(' . h($r['photo_url']) . '); background-size: cover; background-position: center;'
@@ -139,7 +139,7 @@
   <?php else: /* tag mode */ ?>
     <div class="pantry-panel">
       <h3 style="margin-bottom: 12px;">Find recipes containing all of:</h3>
-      <form class="row" style="margin-bottom: 14px;" method="get" action="/pantry" data-js="pantry-tag-form">
+      <form class="row" style="margin-bottom: 14px;" method="get" action="<?= h(url_for('/pantry')) ?>" data-js="pantry-tag-form">
         <input type="hidden" name="mode" value="tag">
         <input type="hidden" name="tags" value="<?= h(implode(',', $tags)) ?>" data-js="tags-hidden">
         <input class="search-input"
@@ -175,4 +175,4 @@
     </div>
   <?php endif; ?>
 </div>
-<script type="module" src="/assets/js/pantry.js"></script>
+<script type="module" src="<?= h(url_for('/assets/js/pantry.js')) ?>"></script>

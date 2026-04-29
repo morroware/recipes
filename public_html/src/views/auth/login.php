@@ -8,7 +8,7 @@
     <div class="pill pill-coral" style="margin-top: 16px; display: inline-block;">⚠ <?= h($error) ?></div>
   <?php endif; ?>
 
-  <form method="post" action="/login" style="margin-top: 24px; display: grid; gap: 14px;">
+  <form method="post" action="<?= h(url_for('/login')) ?>" style="margin-top: 24px; display: grid; gap: 14px;">
     <?= csrf_field() ?>
     <input type="hidden" name="next" value="<?= h($next) ?>">
     <label>

@@ -16,7 +16,7 @@ if (is_file($configPath) && is_file($lockPath)) {
     http_response_code(403);
     echo install_layout('Installer locked',
         '<p>This installer has already run. Delete <code>public_html/db/install.lock</code> and <code>public_html/config.php</code> if you really want to reinstall.</p>'
-        . '<p><a href="/">Go to the app →</a></p>');
+        . '<p><a href="' . htmlspecialchars(install_url_for('/')) . '">Go to the app →</a></p>');
     exit;
 }
 
@@ -128,7 +128,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 'install') {
                 . ($ranSeeds  ? '<li>seeds.sql applied (12 recipes + pantry staples)</li>' : '<li><em>seeds.sql not present yet</em></li>')
                 . '<li>admin ' . htmlspecialchars($values['admin_email']) . ' ' . ($userExists ? 'updated' : 'created') . '</li>'
                 . '</ul>'
-                . '<p><strong>Next step:</strong> delete <code>install.php</code> from your server, then visit <a href="/">the app</a>.</p>');
+                . '<p><strong>Next step:</strong> delete <code>install.php</code> from your server, then visit <a href="' . htmlspecialchars(install_url_for('/')) . '">the app</a>.</p>');
             exit;
         } catch (Throwable $e) {
             $errors[] = 'Install failed: ' . $e->getMessage();
@@ -204,4 +204,13 @@ function install_layout(string $title, string $body): string {
 {$body}
 </body></html>
 HTML;
+}
+
+
+function install_url_for(string $path = '/'): string {
+    $path = '/' . ltrim($path, '/');
+    $script = $_SERVER['SCRIPT_NAME'] ?? '/install.php';
+    $dir = str_replace('\\', '/', dirname($script));
+    $base = ($dir === '/' || $dir === '.') ? '' : rtrim($dir, '/');
+    return $base . $path;
 }

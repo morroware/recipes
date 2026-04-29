@@ -19,7 +19,7 @@
     </p>
   </div>
 
-  <form method="get" action="/" id="filter-form" class="filter-bar" data-js="browse-filters">
+  <form method="get" action="<?= h(url_for('/')) ?>" id="filter-form" class="filter-bar" data-js="browse-filters">
     <input
       type="search"
       name="search"
@@ -74,7 +74,7 @@
   <?php if (count($recipes) === 0): ?>
     <div class="empty">
       <div class="empty-glyph">🤷</div>
-      <div>Nothing matches. <a href="/">Clear filters</a>?</div>
+      <div>Nothing matches. <a href="<?= h(url_for('/')) ?>">Clear filters</a>?</div>
     </div>
   <?php else: ?>
     <div class="grid">
@@ -84,4 +84,4 @@
     </div>
   <?php endif; ?>
 </div>
-<script type="module" src="/assets/js/browse.js"></script>
+<script type="module" src="<?= h(url_for('/assets/js/browse.js')) ?>"></script>

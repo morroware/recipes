@@ -26,7 +26,7 @@ $colors = STICKER_COLORS;
         <div class="day-date"><?= h($dates[$day]->format('M j')) ?></div>
 
         <?php if ($entry): $rcolor = $colors[$entry['color']] ?? $colors['mint']; ?>
-          <a class="day-slot-filled" href="/recipes/<?= (int)$entry['id'] ?>" style="text-decoration: none; color: inherit;">
+          <a class="day-slot-filled" href="<?= h(url_for('/recipes/' . (int)$entry['id'])) ?>" style="text-decoration: none; color: inherit;">
             <div style="font-size: 28px; margin-bottom: 4px;"><?= h($entry['glyph']) ?></div>
             <div style="font-family: 'Bricolage Grotesque', sans-serif; font-weight: 800; font-size: 14px; line-height: 1.1;">
               <?= h($entry['title']) ?>
@@ -67,4 +67,4 @@ $colors = STICKER_COLORS;
   'photo_url'    => $r['photo_url'] ?? null,
   'tags'         => $r['tags'] ?? [],
 ], $recipes), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
-<script type="module" src="/assets/js/plan.js"></script>
+<script type="module" src="<?= h(url_for('/assets/js/plan.js')) ?>"></script>

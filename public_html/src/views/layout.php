@@ -29,9 +29,10 @@ $active = $active ?? '';
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700;800&family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500;700&family=Fraunces:wght@600;700;800&family=Inter:wght@400;500;700&family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;500;700&family=Nunito:wght@600;700;800;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/assets/css/styles.css">
-  <link rel="stylesheet" href="/assets/css/recipe-picker.css">
+  <link rel="stylesheet" href="<?= h(url_for('/assets/css/styles.css')) ?>">
+  <link rel="stylesheet" href="<?= h(url_for('/assets/css/recipe-picker.css')) ?>">
   <meta name="csrf-token" content="<?= h(function_exists('csrf_token') ? csrf_token() : '') ?>">
+  <meta name="app-base-path" content="<?= h(app_base_path()) ?>">
   <meta name="app-version" content="<?= h(defined('APP_VERSION') ? APP_VERSION : '') ?>">
 </head>
 <body>
@@ -44,9 +45,9 @@ $active = $active ?? '';
       <?php require $body_view; ?>
     </main>
   </div>
-  <script type="module" src="/assets/js/app.js"></script>
+  <script type="module" src="<?= h(url_for('/assets/js/app.js')) ?>"></script>
   <?php if (function_exists('is_logged_in') && is_logged_in()): ?>
-    <script type="module" src="/assets/js/tweaks.js"></script>
+    <script type="module" src="<?= h(url_for('/assets/js/tweaks.js')) ?>"></script>
   <?php endif; ?>
 </body>
 </html>
