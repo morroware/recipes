@@ -1,0 +1,111 @@
+/* Recipe Picker styles — searchable, scrollable, scales to hundreds */
+
+.recipe-picker {
+  background: var(--cream);
+  border: 2px solid var(--ink);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  box-shadow: 3px 3px 0 var(--ink);
+  display: flex;
+  flex-direction: column;
+}
+
+.recipe-picker-header {
+  padding: 14px;
+  border-bottom: 2px solid var(--ink);
+  background: var(--cream-2);
+}
+
+.recipe-picker-list {
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.recipe-picker-list::-webkit-scrollbar { width: 8px; }
+.recipe-picker-list::-webkit-scrollbar-thumb { background: var(--ink-soft); border-radius: 4px; }
+
+.recipe-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1.5px dashed rgba(31,27,22,0.15);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.recipe-picker-row:hover { background: var(--cream-2); }
+.recipe-picker-row.selected { background: var(--butter); }
+.recipe-picker-row:last-child { border-bottom: none; }
+
+.recipe-picker-thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--r-sm);
+  border: 1.5px solid var(--ink);
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  flex-shrink: 0;
+  background-size: cover;
+  background-position: center;
+}
+
+.recipe-picker-body { flex: 1; min-width: 0; }
+.recipe-picker-title {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 15px;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.recipe-picker-meta {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-soft);
+  margin-top: 2px;
+}
+
+.recipe-picker-mark {
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--ink);
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 13px;
+  flex-shrink: 0;
+  background: var(--cream);
+}
+.recipe-picker-mark-single { border-radius: 50%; }
+.recipe-picker-mark-multi { border-radius: 6px; }
+.recipe-picker-row.selected .recipe-picker-mark { background: var(--mint); }
+
+.print-warning {
+  background: var(--butter);
+  border: 2px solid var(--ink);
+  border-radius: var(--r-md);
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.split-2 {
+  display: grid;
+  grid-template-columns: minmax(320px, 420px) 1fr;
+  gap: 24px;
+  align-items: start;
+}
+@media (max-width: 900px) { .split-2 { grid-template-columns: 1fr; } }
+
+.print-preview-empty {
+  border: 2px dashed var(--ink);
+  border-radius: var(--r-md);
+  padding: 60px 20px;
+  text-align: center;
+  color: var(--ink-soft);
+}
