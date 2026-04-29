@@ -58,6 +58,8 @@ $routes = [
     ['GET',  '#^/favorites$#',                               [RecipesController::class, 'favorites'],  true],
     ['GET',  '#^/recipes/(\d+)$#',                           [RecipesController::class, 'show'],       true],
     ['GET',  '#^/pantry$#',                                  [PantryController::class,  'page'],       true],
+    ['GET',  '#^/shopping$#',                                [ShoppingController::class, 'page'],      true],
+    ['GET',  '#^/plan$#',                                    [PlanController::class,     'page'],      true],
 
     // JSON API
     ['POST', '#^/api/recipes/(\d+)/favorite$#',              [RecipesController::class, 'toggleFavorite'], true],
@@ -71,6 +73,19 @@ $routes = [
     ['POST',   '#^/api/pantry/(\d+)/restock$#',              [PantryController::class, 'apiRestock'],      true],
     ['PATCH',  '#^/api/pantry/(\d+)$#',                      [PantryController::class, 'apiUpdate'],       true],
     ['DELETE', '#^/api/pantry/(\d+)$#',                      [PantryController::class, 'apiDelete'],       true],
+
+    ['GET',    '#^/api/shopping$#',                          [ShoppingController::class, 'apiList'],            true],
+    ['POST',   '#^/api/shopping$#',                          [ShoppingController::class, 'apiCreate'],          true],
+    ['DELETE', '#^/api/shopping$#',                          [ShoppingController::class, 'apiClearAll'],        true],
+    ['POST',   '#^/api/shopping/move-to-pantry$#',           [ShoppingController::class, 'apiMoveToPantry'],    true],
+    ['POST',   '#^/api/shopping/from-recipe/(\d+)$#',        [ShoppingController::class, 'apiAddFromRecipe'],   true],
+    ['PATCH',  '#^/api/shopping/(\d+)$#',                    [ShoppingController::class, 'apiUpdate'],          true],
+    ['DELETE', '#^/api/shopping/(\d+)$#',                    [ShoppingController::class, 'apiDelete'],          true],
+
+    ['GET',    '#^/api/plan$#',                              [PlanController::class, 'apiList'],              true],
+    ['DELETE', '#^/api/plan$#',                              [PlanController::class, 'apiClear'],             true],
+    ['POST',   '#^/api/plan/build-shopping-list$#',          [PlanController::class, 'apiBuildShopping'],     true],
+    ['PUT',    '#^/api/plan/(Mon|Tue|Wed|Thu|Fri|Sat|Sun)$#',[PlanController::class, 'apiSetDay'],            true],
 ];
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';

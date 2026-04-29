@@ -50,7 +50,10 @@ if (root) {
       const qtyEl = row.querySelector('.ingredient-qty');
       if (qtyEl) qtyEl.textContent = fmtQty(ing.qty, ing.unit);
     });
-    if (servEl) servEl.textContent = scaledServings + ' servings';
+    if (servEl) {
+      servEl.textContent = scaledServings + ' servings';
+      servEl.dataset.current = String(scaledServings);
+    }
   }
   renderIngredients();
 
