@@ -80,6 +80,9 @@
       <h2>All recipes</h2>
       <span class="page-count-pill"><?= count($recipes) ?> found</span>
     </div>
+    <div class="row" style="gap:6px;">
+      <button type="button" class="btn btn-sm btn-lilac" data-ai-open="suggest">✨ Suggest new</button>
+    </div>
   </div>
 
   <?php if (count($recipes) === 0): ?>

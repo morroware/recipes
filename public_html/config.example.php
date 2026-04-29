@@ -14,4 +14,9 @@ return [
     ],
     'app_key'      => '<32-byte hex string written by install.php>',
     'session_name' => 'rb_sess',
+
+    // Optional: enables Claude-powered AI features (bulk pantry add, recipe
+    // import/suggestions, in-app chat). Get a key at console.anthropic.com.
+    // Falls back to the ANTHROPIC_API_KEY env var if this is not set.
+    'anthropic_api_key' => '',
 ];

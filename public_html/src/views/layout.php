@@ -48,6 +48,7 @@ $active = $active ?? '';
   <script type="module" src="<?= h(url_for('/assets/js/app.js')) ?>"></script>
   <?php if (function_exists('is_logged_in') && is_logged_in()): ?>
     <script type="module" src="<?= h(url_for('/assets/js/tweaks.js')) ?>"></script>
+    <script type="module" src="<?= h(url_for('/assets/js/ai.js')) ?>"></script>
   <?php endif; ?>
 </body>
 </html>

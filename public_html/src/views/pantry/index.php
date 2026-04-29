@@ -38,7 +38,7 @@
           Tap the checkbox to mark in stock / out. Items stay in your kitchen list either way.
         </p>
 
-        <form class="row" style="margin-bottom: 14px;" data-js="pantry-add">
+        <form class="row" style="margin-bottom: 10px;" data-js="pantry-add">
           <input
             class="search-input"
             name="name"
@@ -47,6 +47,10 @@
             required>
           <button type="submit" class="btn btn-primary">Add</button>
         </form>
+        <div class="row" style="margin-bottom: 14px; gap: 6px;">
+          <button type="button" class="btn btn-sm btn-lilac" data-ai-open="bulk">✨ Bulk add with AI</button>
+          <button type="button" class="btn btn-sm btn-mint" data-ai-open="suggest">🍳 What can I make?</button>
+        </div>
 
         <?php if (!empty($mostUsed)): ?>
           <div style="margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1.5px dashed rgba(31,27,22,0.18);">
