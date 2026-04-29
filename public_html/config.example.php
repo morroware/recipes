@@ -7,6 +7,7 @@ return [
     'db' => [
         'host'    => 'localhost',
         'name'    => 'cpaneluser_recipes',
+        'port'    => 3306,
         'user'    => 'cpaneluser_recipes',
         'pass'    => 'replace-me',
         'charset' => 'utf8mb4',
