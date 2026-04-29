@@ -61,17 +61,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 'install') {
 
     if (!$errors && $pdo) {
         try {
-            // Run schema + seeds if Phase 1 artifacts are present.
+            // Order matters: schema → admin user (id=1) → seeds (which reference user_id=1).
+            $userExists = false;
+            $ranSchema  = false;
+            $ranSeeds   = false;
+
             if (is_file($schemaPath)) {
                 run_sql_file($pdo, $schemaPath);
-            }
-            if (is_file($seedsPath)) {
-                run_sql_file($pdo, $seedsPath);
+                $ranSchema = true;
             }
 
-            // Insert / update the single admin user (idempotent on email).
             $hash = password_hash($values['admin_pass'], PASSWORD_BCRYPT);
-            $userExists = false;
             try {
                 $check = $pdo->prepare('SELECT id FROM users WHERE email = ? LIMIT 1');
                 $check->execute([$values['admin_email']]);
@@ -81,13 +81,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 'install') {
                     $upd->execute([$hash, $values['admin_name'], $existing['id']]);
                     $userExists = true;
                 } else {
-                    $ins = $pdo->prepare('INSERT INTO users (email, password_hash, display_name, created_at) VALUES (?, ?, ?, NOW())');
+                    $ins = $pdo->prepare('INSERT INTO users (id, email, password_hash, display_name, created_at) VALUES (1, ?, ?, ?, NOW())');
                     $ins->execute([$values['admin_email'], $hash, $values['admin_name']]);
                 }
             } catch (Throwable $e) {
-                // users table may not exist yet (Phase 0). That's fine — we'll
-                // store the admin credentials in config and create the row when
-                // schema.sql is added.
+                // users table may not exist yet (Phase 0 with no schema.sql).
+                // Capture and surface, but do not abort — config still gets written.
+                $errors[] = 'Could not create admin user yet: ' . $e->getMessage();
+            }
+
+            if (is_file($seedsPath)) {
+                run_sql_file($pdo, $seedsPath);
+                $ranSeeds = true;
             }
 
             // Generate an app key + write config.php
@@ -114,9 +119,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 'install') {
                 '<p>✅ Recipe Book is installed.</p>'
                 . '<ul>'
                 . '<li>config.php written</li>'
-                . (is_file($schemaPath) ? '<li>schema.sql applied</li>' : '<li><em>schema.sql not present yet — will be applied when you upload Phase&nbsp;1 files</em></li>')
-                . (is_file($seedsPath)  ? '<li>seeds.sql applied</li>'  : '<li><em>seeds.sql not present yet</em></li>')
-                . '<li>admin ' . htmlspecialchars($values['admin_email']) . ' ' . ($userExists ? 'updated' : 'created (or queued for creation)') . '</li>'
+                . ($ranSchema ? '<li>schema.sql applied</li>' : '<li><em>schema.sql not present — upload it and re-run</em></li>')
+                . ($ranSeeds  ? '<li>seeds.sql applied (12 recipes + pantry staples)</li>' : '<li><em>seeds.sql not present yet</em></li>')
+                . '<li>admin ' . htmlspecialchars($values['admin_email']) . ' ' . ($userExists ? 'updated' : 'created') . '</li>'
                 . '</ul>'
                 . '<p><strong>Next step:</strong> delete <code>install.php</code> from your server, then visit <a href="/">the app</a>.</p>');
             exit;
