@@ -32,6 +32,7 @@ $active = $active ?? '';
   <link rel="stylesheet" href="/assets/css/styles.css">
   <link rel="stylesheet" href="/assets/css/recipe-picker.css">
   <meta name="csrf-token" content="<?= h(function_exists('csrf_token') ? csrf_token() : '') ?>">
+  <meta name="app-version" content="<?= h(defined('APP_VERSION') ? APP_VERSION : '') ?>">
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to main content</a>
