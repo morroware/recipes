@@ -980,6 +980,7 @@ button { font-family: inherit; cursor: pointer; }
   place-items: center;
   padding: 20px;
 }
+.modal-overlay[hidden] { display: none; }
 .modal {
   background: var(--cream);
   border: 2px solid var(--ink);

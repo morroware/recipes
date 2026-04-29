@@ -30,7 +30,6 @@
     <input type="hidden" name="cuisine" value="<?= h($opts['cuisine']) ?>">
     <input type="hidden" name="time"    value="<?= h($opts['time']) ?>">
     <input type="hidden" name="tag"     value="<?= h($opts['tag']) ?>">
-    <input type="hidden" name="sort"    value="<?= h($opts['sort']) ?>">
     <div class="row" style="gap: 6px; flex-wrap: wrap;">
       <?php foreach (array_slice($cuisines, 0, 7) as $c): ?>
         <button type="submit"
@@ -39,13 +38,24 @@
                 class="filter-chip <?= $opts['cuisine'] === $c ? 'active' : '' ?>"><?= h($c) ?></button>
       <?php endforeach; ?>
     </div>
-    <div class="row" style="gap: 6px;">
+    <div class="row" style="gap: 6px; align-items: center;">
       <?php foreach ($times as $t): ?>
         <button type="submit"
                 name="time"
                 value="<?= h($t) ?>"
                 class="filter-chip <?= $opts['time'] === $t ? 'active' : '' ?>"><?= h($t) ?></button>
       <?php endforeach; ?>
+      <span style="flex: 1;"></span>
+      <label class="mono" style="font-size: 12px; color: var(--ink-soft); display: flex; align-items: center; gap: 6px;">
+        SORT
+        <select name="sort" class="form-input" data-js="sort-select"
+                style="padding: 6px 10px; font-size: 12px; width: auto;">
+          <option value="title"      <?= $opts['sort'] === 'title'      ? 'selected' : '' ?>>A → Z</option>
+          <option value="time"       <?= $opts['sort'] === 'time'       ? 'selected' : '' ?>>Quickest first</option>
+          <option value="newest"     <?= $opts['sort'] === 'newest'     ? 'selected' : '' ?>>Newest</option>
+          <option value="difficulty" <?= $opts['sort'] === 'difficulty' ? 'selected' : '' ?>>Easiest first</option>
+        </select>
+      </label>
     </div>
   </form>
 
@@ -55,7 +65,8 @@
         <?php
           $params = $opts;
           $params['tag'] = $t === 'All' ? '' : $t;
-          $href = '/?' . http_build_query(array_filter($params, fn($v) => $v !== '' && $v !== 'All'));
+          $qs = http_build_query(array_filter($params, fn($v) => $v !== '' && $v !== 'All'));
+          $href = url_for('/') . ($qs !== '' ? '?' . $qs : '');
         ?>
         <a href="<?= h($href) ?>"
            class="pill <?= $active ? 'pill-coral' : '' ?>"

@@ -154,7 +154,7 @@
         <?php foreach ($tags as $t): ?>
           <a href="<?php
               $rest = array_values(array_filter($tags, fn($x) => $x !== $t));
-              echo '/pantry?mode=tag' . ($rest ? '&tags=' . urlencode(implode(',', $rest)) : '');
+              echo h(url_for('/pantry')) . '?mode=tag' . ($rest ? '&tags=' . urlencode(implode(',', $rest)) : '');
             ?>" class="pantry-tag" style="background: var(--butter); text-decoration: none; color: inherit;">
             <?= h($t) ?> <span class="pantry-tag-x">✕</span>
           </a>

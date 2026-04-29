@@ -21,6 +21,14 @@ function json_err(string $error, int $status = 400, $details = null): void {
 }
 
 function redirect(string $to, int $status = 302): void {
+    // Auto-honor the app base path for relative ("/foo") targets so controllers
+    // can write redirect('/login') without worrying about subdir installs.
+    if ($to !== '' && $to[0] === '/' && function_exists('app_base_path')) {
+        $base = app_base_path();
+        if ($base !== '' && !str_starts_with($to, $base . '/') && $to !== $base) {
+            $to = $base . $to;
+        }
+    }
     header('Location: ' . $to, true, $status);
     exit;
 }

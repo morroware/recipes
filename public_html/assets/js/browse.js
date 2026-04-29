@@ -12,4 +12,9 @@ if (form) {
       t = setTimeout(() => form.submit(), 250);
     });
   }
+  // Sort select submits immediately so the grid re-orders without an extra click.
+  const sortSel = form.querySelector('[data-js="sort-select"]');
+  if (sortSel) {
+    sortSel.addEventListener('change', () => form.submit());
+  }
 }
