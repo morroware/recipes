@@ -1,0 +1,6 @@
+public_html/config.php
+public_html/db/install.lock
+public_html/assets/img/uploads/*
+!public_html/assets/img/uploads/.gitkeep
+.DS_Store
+*.log
