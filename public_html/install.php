@@ -31,6 +31,7 @@ $values  = [
     'admin_email'=> $_POST['admin_email']?? '',
     'admin_name' => $_POST['admin_name'] ?? 'me',
     'admin_pass' => $_POST['admin_pass'] ?? '',
+    'anthropic_api_key' => $_POST['anthropic_api_key'] ?? '',
 ];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 'install') {
@@ -110,8 +111,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 'install') {
                     'pass'    => $values['db_pass'],
                     'charset' => 'utf8mb4',
                 ],
-                'app_key'      => $appKey,
-                'session_name' => 'rb_sess',
+                'app_key'           => $appKey,
+                'session_name'      => 'rb_sess',
+                'anthropic_api_key' => trim((string)$values['anthropic_api_key']),
             ];
             file_put_contents($configPath, "<?php\nreturn " . var_export($config, true) . ";\n");
             @chmod($configPath, 0640);
@@ -160,6 +162,10 @@ $body .= '<fieldset><legend>Admin login</legend>';
 $body .= field('Email',         'admin_email', $values['admin_email'], 'email');
 $body .= field('Display name',  'admin_name',  $values['admin_name']);
 $body .= field('Password (8+)', 'admin_pass',  '', 'password');
+$body .= '</fieldset>';
+$body .= '<fieldset><legend>AI features (optional)</legend>';
+$body .= '<p class="muted" style="font-size:13px;">Add your Anthropic API key to enable Claude-powered recipe suggestions, bulk pantry import, and the in-app assistant. Leave blank to skip — you can add it later in <code>config.php</code>.</p>';
+$body .= '<label>Anthropic API key<input type="text" name="anthropic_api_key" value="' . htmlspecialchars($values['anthropic_api_key']) . '" placeholder="sk-ant-…"></label>';
 $body .= '</fieldset>';
 $body .= '<button type="submit">Install</button>';
 $body .= '</form>';

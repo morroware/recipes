@@ -14,6 +14,7 @@ $colors = STICKER_COLORS;
       </div>
     </div>
     <div class="row no-print">
+      <button type="button" class="btn btn-sm btn-lilac" data-ai-open="chat">✨ AI plan</button>
       <button type="button" class="btn btn-sm btn-mint" data-js="build-shopping">🛒 Build shopping list</button>
       <button type="button" class="btn btn-sm" data-js="clear-week">Clear week</button>
     </div>

@@ -1299,3 +1299,441 @@ nav[aria-label="Primary"] [aria-current="page"] {
 @media print {
   .skip-link { display: none !important; }
 }
+
+/* ============================================================
+   Mobile UI — bottom tab nav, sticky header, touch-friendly
+   ============================================================ */
+
+/* Mobile-only bottom nav (hidden on desktop) */
+.mobile-nav { display: none; }
+.mobile-topbar { display: none; }
+.mobile-drawer { display: none; }
+.mobile-only { display: none; }
+.desktop-only { display: initial; }
+
+/* AI floating action button */
+.ai-fab {
+  position: fixed;
+  right: 18px;
+  bottom: 22px;
+  z-index: 700;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  border: 2.5px solid var(--ink);
+  background: linear-gradient(135deg, var(--lilac), var(--blush));
+  box-shadow: 4px 4px 0 var(--ink);
+  display: grid;
+  place-items: center;
+  font-size: 26px;
+  cursor: pointer;
+  transition: transform 0.1s, box-shadow 0.1s;
+  font-family: inherit;
+}
+.ai-fab:hover { transform: translate(-2px, -2px) rotate(-4deg); box-shadow: 6px 6px 0 var(--ink); }
+.ai-fab:active { transform: translate(2px, 2px); box-shadow: none; }
+.ai-fab[hidden] { display: none; }
+
+/* AI panel — bottom-sheet style, mobile-first */
+.ai-panel-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(31,27,22,0.5);
+  z-index: 950;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.ai-panel-overlay[hidden] { display: none; }
+.ai-panel {
+  background: var(--cream);
+  border: 2px solid var(--ink);
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+  width: 100%;
+  max-width: 720px;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 -8px 0 var(--ink);
+  animation: ai-panel-in 220ms cubic-bezier(.34,1.56,.64,1);
+}
+@keyframes ai-panel-in {
+  from { transform: translateY(28px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+.ai-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  border-bottom: 2px solid var(--ink);
+  background: var(--butter);
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+}
+.ai-panel-title {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 18px;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ai-panel-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 12px 12px 0;
+  flex-wrap: wrap;
+  border-bottom: 1.5px dashed rgba(31,27,22,0.18);
+}
+.ai-panel-tab {
+  border: 2px solid var(--ink);
+  background: var(--cream);
+  border-radius: var(--r-pill);
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  margin-bottom: 10px;
+}
+.ai-panel-tab.active { background: var(--ink); color: var(--cream); }
+.ai-panel-body {
+  padding: 16px 18px 18px;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ai-pane[hidden] { display: none; }
+.ai-textarea {
+  width: 100%;
+  border: 2px solid var(--ink);
+  border-radius: var(--r-md);
+  background: var(--cream);
+  padding: 12px;
+  font-family: inherit;
+  font-size: 14px;
+  min-height: 90px;
+  resize: vertical;
+  box-sizing: border-box;
+}
+.ai-textarea:focus { outline: none; background: var(--butter); }
+.ai-output {
+  background: var(--cream-2);
+  border: 2px solid var(--ink);
+  border-radius: var(--r-md);
+  padding: 12px 14px;
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  min-height: 40px;
+}
+.ai-output:empty { display: none; }
+.ai-busy {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+.ai-busy::before {
+  content: '';
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--coral);
+  animation: ai-pulse 0.9s infinite ease-in-out;
+}
+@keyframes ai-pulse {
+  0%,100% { opacity: 0.3; transform: scale(0.8); }
+  50%     { opacity: 1; transform: scale(1.15); }
+}
+.ai-suggest-card {
+  border: 2px solid var(--ink);
+  border-radius: var(--r-md);
+  padding: 12px 14px;
+  background: var(--cream);
+  box-shadow: 2px 2px 0 var(--ink);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ai-suggest-card-title {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 16px;
+}
+.ai-suggest-card-meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+.ai-chat-msg {
+  border: 2px solid var(--ink);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.ai-chat-msg.user { background: var(--sky); align-self: flex-end; max-width: 85%; }
+.ai-chat-msg.assistant { background: var(--cream); max-width: 95%; }
+.ai-chat-msg.error { background: var(--coral); }
+.ai-chat-log { display: flex; flex-direction: column; gap: 8px; }
+
+/* ---------- Mobile breakpoint ---------- */
+@media (max-width: 720px) {
+  html, body { font-size: 15px; }
+
+  .desktop-only { display: none !important; }
+  .mobile-only  { display: initial !important; }
+
+  /* Hide the desktop-style top button row */
+  nav[aria-label="Primary"]:not(.mobile-topbar) { display: none !important; }
+
+  /* Sticky mobile top bar */
+  .mobile-topbar {
+    display: flex !important;
+    position: sticky;
+    top: 0;
+    z-index: 60;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    background: var(--cream);
+    border-bottom: 2px solid var(--ink);
+  }
+  .mobile-topbar .nav-brand-glyph {
+    width: 32px; height: 32px;
+    font-size: 16px;
+  }
+  .mobile-topbar .brand-text {
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: 17px;
+    flex: 1;
+    letter-spacing: -0.02em;
+  }
+  .mobile-topbar .icon-btn {
+    width: 40px; height: 40px;
+    border: 2px solid var(--ink);
+    background: var(--cream);
+    border-radius: 12px;
+    display: grid;
+    place-items: center;
+    font-size: 20px;
+    box-shadow: 2px 2px 0 var(--ink);
+    cursor: pointer;
+  }
+  .mobile-topbar .icon-btn:active { transform: translate(2px,2px); box-shadow: none; }
+
+  /* Drawer for secondary actions */
+  .mobile-drawer {
+    display: block !important;
+    position: fixed;
+    inset: 0;
+    z-index: 800;
+    background: rgba(31,27,22,0.45);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 160ms ease;
+  }
+  .mobile-drawer[data-open="true"] {
+    pointer-events: auto;
+    opacity: 1;
+  }
+  .mobile-drawer-panel {
+    position: absolute;
+    top: 0; right: 0; bottom: 0;
+    width: min(280px, 80vw);
+    background: var(--cream);
+    border-left: 2.5px solid var(--ink);
+    padding: 18px 16px;
+    transform: translateX(100%);
+    transition: transform 200ms ease;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow-y: auto;
+  }
+  .mobile-drawer[data-open="true"] .mobile-drawer-panel { transform: translateX(0); }
+  .mobile-drawer-panel a,
+  .mobile-drawer-panel button {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border: 2px solid var(--ink);
+    border-radius: var(--r-md);
+    background: var(--cream);
+    font-family: inherit;
+    font-weight: 700;
+    text-decoration: none;
+    color: var(--ink);
+    font-size: 15px;
+  }
+  .mobile-drawer-panel a[aria-current="page"] {
+    background: var(--ink);
+    color: var(--cream);
+  }
+  .mobile-drawer-close {
+    align-self: flex-end;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    font-size: 22px !important;
+    padding: 4px 10px !important;
+  }
+
+  /* Bottom tab bar */
+  .mobile-nav {
+    display: flex !important;
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    z-index: 60;
+    background: var(--cream);
+    border-top: 2.5px solid var(--ink);
+    padding: 6px 4px calc(6px + env(safe-area-inset-bottom, 0px));
+    justify-content: space-around;
+    gap: 2px;
+  }
+  .mobile-nav-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 6px 4px;
+    text-decoration: none;
+    color: var(--ink-2);
+    font-size: 10px;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-radius: 10px;
+    border: none;
+    background: transparent;
+  }
+  .mobile-nav-item .glyph { font-size: 22px; line-height: 1; }
+  .mobile-nav-item[aria-current="page"] {
+    color: var(--ink);
+    background: var(--butter);
+    box-shadow: inset 0 0 0 2px var(--ink);
+  }
+
+  /* Add space at the bottom so content isn't hidden behind the tab bar */
+  body { padding-bottom: 70px; }
+  .ai-fab { bottom: 80px; }
+
+  /* Page chrome: tighter padding on mobile */
+  .page { padding: 18px 14px 24px; }
+  [data-density="compact"] .page { padding: 12px 12px 24px; }
+  .hero { padding: 24px 22px; margin-bottom: 20px; border-radius: var(--r-md); }
+  .hero h1 { font-size: clamp(28px, 8vw, 38px); }
+  .hero p { font-size: 14px; }
+  .hero-stickers { display: none; }
+
+  .page-header { margin-bottom: 16px; }
+  .page-title-wrap { gap: 8px; }
+  h1 { font-size: clamp(28px, 7vw, 38px); }
+  h2 { font-size: clamp(22px, 5vw, 28px); }
+
+  /* Filter bar wraps better on mobile */
+  .filter-bar {
+    padding: 12px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    border-radius: var(--r-md);
+  }
+  .filter-bar .row { width: 100%; gap: 6px; overflow-x: auto; flex-wrap: nowrap; padding-bottom: 4px; }
+  .filter-bar .row::-webkit-scrollbar { display: none; }
+  .filter-bar .row { -ms-overflow-style: none; scrollbar-width: none; }
+  .filter-chip { white-space: nowrap; flex-shrink: 0; }
+  .search-input { width: 100%; padding: 12px 14px; font-size: 16px; }
+
+  /* Recipe grid: single column on small screens */
+  .grid { grid-template-columns: 1fr; gap: 14px; }
+  [data-density="compact"] .grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+  .recipe-card { border-radius: var(--r-md); }
+  .recipe-card-img { aspect-ratio: 16/9; font-size: 56px; }
+  .recipe-card-title { font-size: 19px; }
+
+  /* Detail page */
+  .detail-grid { gap: 14px; }
+  .detail-hero { aspect-ratio: 16/10; border-radius: var(--r-md); }
+  .detail-hero.no-photo { font-size: 90px; }
+  .detail-section { padding: 16px; margin-top: 14px; border-radius: var(--r-md); }
+  .detail-meta-row { gap: 6px; }
+  .detail-stat { padding: 8px 10px; font-size: 11px; }
+  .detail-stat-value { font-size: 14px; }
+
+  .recipe-card-fav { width: 38px; height: 38px; }
+
+  /* Pantry */
+  .pantry-grid { grid-template-columns: 1fr; gap: 14px; }
+  .pantry-panel { padding: 14px; border-radius: var(--r-md); }
+  .pantry-row { padding: 10px 4px; }
+  .pantry-row-name { font-size: 16px; }
+  .pantry-check { width: 26px; height: 26px; }
+
+  /* Suggest card */
+  .suggest-card { padding: 10px; gap: 10px; }
+  .suggest-card-glyph { width: 50px; height: 50px; font-size: 24px; }
+
+  /* Plan grid: 1 column with day names */
+  .week-grid { grid-template-columns: 1fr; gap: 10px; }
+  .day-col { min-height: auto; padding: 14px; }
+
+  /* Shopping rows */
+  .shop-row { padding: 12px 6px; }
+  .shop-name { font-size: 15px; }
+
+  /* Add/edit form */
+  .form-row-mini {
+    grid-template-columns: 60px 60px 1fr;
+    grid-auto-rows: auto;
+    gap: 6px;
+  }
+  .form-row-mini > select,
+  .form-row-mini > [data-action="remove-ingredient"] {
+    grid-column: span 3;
+  }
+  .form-input, .form-textarea { font-size: 16px; padding: 10px 12px; }
+
+  /* Buttons: bigger touch target */
+  .btn { padding: 12px 16px; font-size: 15px; min-height: 44px; }
+  .btn-sm { padding: 8px 12px; font-size: 13px; min-height: 38px; }
+  .btn-icon { width: 44px; height: 44px; }
+
+  /* Modals: full width on mobile */
+  .modal { padding: 18px; max-height: 92vh; border-radius: var(--r-md); }
+
+  /* Cook overlay padding */
+  .cook-overlay { padding: 18px; }
+  .cook-step-text { font-size: clamp(22px, 6vw, 32px); padding: 14px 0; }
+
+  /* AI panel takes most of viewport on mobile */
+  .ai-panel { max-height: 92vh; }
+  .ai-panel-body { padding: 14px; }
+
+  /* Recipe-card cuisine row a bit smaller */
+  .recipe-card-body { padding: 12px 14px 14px; }
+
+  /* Nav brand on small screens hidden */
+  .nav-brand { font-size: 18px; }
+
+  /* Tweaks panel mobile fix */
+  .tweaks-panel { width: calc(100vw - 24px) !important; max-width: 360px; }
+}
+
+/* ---------- Small tablet tweaks ---------- */
+@media (min-width: 721px) and (max-width: 1024px) {
+  .grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+  .detail-grid { grid-template-columns: 1fr; }
+  .pantry-grid { grid-template-columns: 1fr; }
+}

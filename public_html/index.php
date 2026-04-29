@@ -37,6 +37,7 @@ require_once SRC_PATH . '/lib/view.php';
 require_once SRC_PATH . '/lib/constants.php';
 require_once SRC_PATH . '/lib/pantry_helpers.php';
 require_once SRC_PATH . '/lib/version.php';
+require_once SRC_PATH . '/lib/ai.php';
 
 // 4) Tiny autoloader for src/controllers/*.php and src/models/*.php.
 spl_autoload_register(static function (string $class): void {
@@ -95,6 +96,16 @@ $routes = [
     ['DELETE', '#^/api/plan$#',                              [PlanController::class, 'apiClear'],             true],
     ['POST',   '#^/api/plan/build-shopping-list$#',          [PlanController::class, 'apiBuildShopping'],     true],
     ['PUT',    '#^/api/plan/(Mon|Tue|Wed|Thu|Fri|Sat|Sun)$#',[PlanController::class, 'apiSetDay'],            true],
+
+    // AI (Claude) endpoints
+    ['GET',  '#^/api/ai/status$#',                           [AiController::class, 'apiStatus'],              true],
+    ['POST', '#^/api/ai/chat$#',                             [AiController::class, 'apiChat'],                true],
+    ['POST', '#^/api/ai/parse-ingredients$#',                [AiController::class, 'apiParseIngredients'],    true],
+    ['POST', '#^/api/ai/parse-recipe$#',                     [AiController::class, 'apiParseRecipe'],         true],
+    ['POST', '#^/api/ai/recipe-suggestions$#',               [AiController::class, 'apiRecipeSuggestions'],   true],
+    ['POST', '#^/api/ai/recipe-from-idea$#',                 [AiController::class, 'apiRecipeFromIdea'],      true],
+    ['POST', '#^/api/ai/categorize$#',                       [AiController::class, 'apiCategorize'],          true],
+    ['POST', '#^/api/ai/plan-week$#',                        [AiController::class, 'apiPlanWeek'],            true],
 ];
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';

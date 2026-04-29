@@ -26,6 +26,9 @@ $d = [
 <div class="page" data-page="add" data-mode="<?= h($mode) ?>" data-recipe-id="<?= (int)$d['id'] ?>">
   <div class="row no-print" style="margin-bottom: 20px;">
     <a class="btn btn-ghost" href="<?= h(url_for('/')) ?>">← All recipes</a>
+    <?php if (!$isEdit): ?>
+      <button type="button" class="btn btn-sm btn-lilac" data-ai-open="import">✨ Import from text</button>
+    <?php endif; ?>
     <?php if ($isEdit): ?>
       <a class="btn btn-ghost" href="<?= h(url_for('/recipes/' . (int)$d['id'])) ?>">View recipe</a>
       <span style="flex: 1"></span>
