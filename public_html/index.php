@@ -35,6 +35,7 @@ require_once SRC_PATH . '/lib/csrf.php';
 require_once SRC_PATH . '/lib/response.php';
 require_once SRC_PATH . '/lib/view.php';
 require_once SRC_PATH . '/lib/constants.php';
+require_once SRC_PATH . '/lib/pantry_helpers.php';
 
 // 4) Tiny autoloader for src/controllers/*.php and src/models/*.php.
 spl_autoload_register(static function (string $class): void {
@@ -56,10 +57,20 @@ $routes = [
     ['GET',  '#^/$#',                                        [RecipesController::class, 'browse'],     true],
     ['GET',  '#^/favorites$#',                               [RecipesController::class, 'favorites'],  true],
     ['GET',  '#^/recipes/(\d+)$#',                           [RecipesController::class, 'show'],       true],
+    ['GET',  '#^/pantry$#',                                  [PantryController::class,  'page'],       true],
 
     // JSON API
     ['POST', '#^/api/recipes/(\d+)/favorite$#',              [RecipesController::class, 'toggleFavorite'], true],
     ['PUT',  '#^/api/recipes/(\d+)/notes$#',                 [RecipesController::class, 'updateNotes'],    true],
+    ['GET',  '#^/api/recipes/suggestions$#',                 [PantryController::class,  'apiSuggestions'], true],
+    ['GET',  '#^/api/recipes/by-ingredients$#',              [PantryController::class,  'apiByIngredients'], true],
+
+    ['GET',    '#^/api/pantry$#',                            [PantryController::class, 'apiList'],         true],
+    ['POST',   '#^/api/pantry$#',                            [PantryController::class, 'apiCreate'],       true],
+    ['GET',    '#^/api/pantry/categorize$#',                 [PantryController::class, 'apiCategorize'],   true],
+    ['POST',   '#^/api/pantry/(\d+)/restock$#',              [PantryController::class, 'apiRestock'],      true],
+    ['PATCH',  '#^/api/pantry/(\d+)$#',                      [PantryController::class, 'apiUpdate'],       true],
+    ['DELETE', '#^/api/pantry/(\d+)$#',                      [PantryController::class, 'apiDelete'],       true],
 ];
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
