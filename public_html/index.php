@@ -65,6 +65,7 @@ $routes = [
     ['GET',  '#^/shopping$#',                                [ShoppingController::class, 'page'],      true],
     ['GET',  '#^/plan$#',                                    [PlanController::class,     'page'],      true],
     ['GET',  '#^/print$#',                                   [PrintController::class,    'page'],      true],
+    ['GET',  '#^/chat$#',                                    [AiController::class,       'page'],      true],
 
     // JSON API
     ['POST', '#^/api/recipes$#',                             [RecipesController::class, 'apiCreate'],     true],
@@ -106,6 +107,26 @@ $routes = [
     ['POST', '#^/api/ai/recipe-from-idea$#',                 [AiController::class, 'apiRecipeFromIdea'],      true],
     ['POST', '#^/api/ai/categorize$#',                       [AiController::class, 'apiCategorize'],          true],
     ['POST', '#^/api/ai/plan-week$#',                        [AiController::class, 'apiPlanWeek'],            true],
+    ['POST', '#^/api/ai/extract-memories$#',                 [AiController::class, 'apiExtractMemories'],     true],
+
+    // AI memory (preferences the assistant remembers)
+    ['GET',    '#^/api/ai/memories$#',                       [AiController::class, 'apiMemoriesList'],        true],
+    ['POST',   '#^/api/ai/memories$#',                       [AiController::class, 'apiMemoriesCreate'],      true],
+    ['DELETE', '#^/api/ai/memories$#',                       [AiController::class, 'apiMemoriesClear'],       true],
+    ['PATCH',  '#^/api/ai/memories/(\d+)$#',                 [AiController::class, 'apiMemoriesUpdate'],      true],
+    ['DELETE', '#^/api/ai/memories/(\d+)$#',                 [AiController::class, 'apiMemoriesDelete'],      true],
+
+    // AI conversations (persistent chat history)
+    ['GET',    '#^/api/ai/conversations$#',                  [AiController::class, 'apiConvList'],            true],
+    ['POST',   '#^/api/ai/conversations$#',                  [AiController::class, 'apiConvCreate'],          true],
+    ['GET',    '#^/api/ai/conversations/(\d+)$#',            [AiController::class, 'apiConvShow'],            true],
+    ['PATCH',  '#^/api/ai/conversations/(\d+)$#',            [AiController::class, 'apiConvRename'],          true],
+    ['DELETE', '#^/api/ai/conversations/(\d+)$#',            [AiController::class, 'apiConvDelete'],          true],
+
+    // Cooking history (recipes the user has actually made)
+    ['GET',    '#^/api/cooking-log$#',                       [AiController::class, 'apiCookingList'],         true],
+    ['POST',   '#^/api/cooking-log$#',                       [AiController::class, 'apiCookingCreate'],       true],
+    ['DELETE', '#^/api/cooking-log/(\d+)$#',                 [AiController::class, 'apiCookingDelete'],       true],
 ];
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';

@@ -17,6 +17,9 @@ $stepsJson       = json_encode(array_column($recipe['steps'], 'text'), JSON_UNES
     <a class="btn btn-sm" href="<?= h(url_for('/recipes/' . (int)$recipe['id'] . '/edit')) ?>">✏️ Edit</a>
     <button class="btn btn-sm" type="button" data-action="print">🖨️ Print</button>
     <button class="btn btn-sm" type="button" data-action="add-to-shopping" data-recipe-id="<?= (int)$recipe['id'] ?>">🛒 Add to shopping</button>
+    <button class="btn btn-sm" type="button" data-action="log-cooked"
+            data-recipe-id="<?= (int)$recipe['id'] ?>"
+            data-recipe-title="<?= h($recipe['title']) ?>">🍽️ I made this</button>
     <button class="btn btn-sm <?= $isFav ? 'btn-coral' : '' ?>"
             type="button"
             data-action="toggle-favorite"
