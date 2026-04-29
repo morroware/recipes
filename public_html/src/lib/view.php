@@ -35,14 +35,20 @@ function default_tweaks(): array {
         'mode'          => 'light',
         'fontPair'      => 'default',
         'radius'        => 'default',
+        'cardStyle'     => 'mix',
         'stickerRotate' => 'on',
         'dotGrid'       => 'on',
+        'units'         => 'metric',
     ];
 }
 
 function load_user_tweaks(int $user_id): array {
     try {
-        $stmt = db()->prepare('SELECT density, theme, mode, font_pair, radius, sticker_rotate, dot_grid FROM user_settings WHERE user_id = ?');
+        $stmt = db()->prepare(
+            'SELECT density, theme, mode, font_pair, radius, card_style,
+                    sticker_rotate, dot_grid, units
+               FROM user_settings WHERE user_id = ?'
+        );
         $stmt->execute([$user_id]);
         $row = $stmt->fetch();
     } catch (Throwable $e) {
@@ -55,7 +61,9 @@ function load_user_tweaks(int $user_id): array {
         'mode'          => $row['mode'],
         'fontPair'      => $row['font_pair'],
         'radius'        => $row['radius'],
+        'cardStyle'     => $row['card_style'],
         'stickerRotate' => $row['sticker_rotate'] ? 'on' : 'off',
         'dotGrid'       => $row['dot_grid'] ? 'on' : 'off',
+        'units'         => $row['units'],
     ];
 }

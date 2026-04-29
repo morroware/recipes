@@ -35,6 +35,7 @@ require_once SRC_PATH . '/lib/csrf.php';
 require_once SRC_PATH . '/lib/response.php';
 require_once SRC_PATH . '/lib/view.php';
 require_once SRC_PATH . '/lib/constants.php';
+require_once SRC_PATH . '/lib/pantry_helpers.php';
 
 // 4) Tiny autoloader for src/controllers/*.php and src/models/*.php.
 spl_autoload_register(static function (string $class): void {
@@ -56,10 +57,43 @@ $routes = [
     ['GET',  '#^/$#',                                        [RecipesController::class, 'browse'],     true],
     ['GET',  '#^/favorites$#',                               [RecipesController::class, 'favorites'],  true],
     ['GET',  '#^/recipes/(\d+)$#',                           [RecipesController::class, 'show'],       true],
+    ['GET',  '#^/recipes/(\d+)/edit$#',                      [RecipesController::class, 'editPage'],   true],
+    ['GET',  '#^/add$#',                                     [RecipesController::class, 'newPage'],    true],
+    ['GET',  '#^/pantry$#',                                  [PantryController::class,  'page'],       true],
+    ['GET',  '#^/shopping$#',                                [ShoppingController::class, 'page'],      true],
+    ['GET',  '#^/plan$#',                                    [PlanController::class,     'page'],      true],
+    ['GET',  '#^/print$#',                                   [PrintController::class,    'page'],      true],
 
     // JSON API
+    ['POST', '#^/api/recipes$#',                             [RecipesController::class, 'apiCreate'],     true],
+    ['PUT',  '#^/api/recipes/(\d+)$#',                       [RecipesController::class, 'apiUpdate'],     true],
+    ['DELETE','#^/api/recipes/(\d+)$#',                      [RecipesController::class, 'apiDelete'],     true],
     ['POST', '#^/api/recipes/(\d+)/favorite$#',              [RecipesController::class, 'toggleFavorite'], true],
     ['PUT',  '#^/api/recipes/(\d+)/notes$#',                 [RecipesController::class, 'updateNotes'],    true],
+    ['GET',  '#^/api/settings$#',                            [SettingsController::class, 'apiGet'],     true],
+    ['PUT',  '#^/api/settings$#',                            [SettingsController::class, 'apiUpdate'],  true],
+    ['GET',  '#^/api/recipes/suggestions$#',                 [PantryController::class,  'apiSuggestions'], true],
+    ['GET',  '#^/api/recipes/by-ingredients$#',              [PantryController::class,  'apiByIngredients'], true],
+
+    ['GET',    '#^/api/pantry$#',                            [PantryController::class, 'apiList'],         true],
+    ['POST',   '#^/api/pantry$#',                            [PantryController::class, 'apiCreate'],       true],
+    ['GET',    '#^/api/pantry/categorize$#',                 [PantryController::class, 'apiCategorize'],   true],
+    ['POST',   '#^/api/pantry/(\d+)/restock$#',              [PantryController::class, 'apiRestock'],      true],
+    ['PATCH',  '#^/api/pantry/(\d+)$#',                      [PantryController::class, 'apiUpdate'],       true],
+    ['DELETE', '#^/api/pantry/(\d+)$#',                      [PantryController::class, 'apiDelete'],       true],
+
+    ['GET',    '#^/api/shopping$#',                          [ShoppingController::class, 'apiList'],            true],
+    ['POST',   '#^/api/shopping$#',                          [ShoppingController::class, 'apiCreate'],          true],
+    ['DELETE', '#^/api/shopping$#',                          [ShoppingController::class, 'apiClearAll'],        true],
+    ['POST',   '#^/api/shopping/move-to-pantry$#',           [ShoppingController::class, 'apiMoveToPantry'],    true],
+    ['POST',   '#^/api/shopping/from-recipe/(\d+)$#',        [ShoppingController::class, 'apiAddFromRecipe'],   true],
+    ['PATCH',  '#^/api/shopping/(\d+)$#',                    [ShoppingController::class, 'apiUpdate'],          true],
+    ['DELETE', '#^/api/shopping/(\d+)$#',                    [ShoppingController::class, 'apiDelete'],          true],
+
+    ['GET',    '#^/api/plan$#',                              [PlanController::class, 'apiList'],              true],
+    ['DELETE', '#^/api/plan$#',                              [PlanController::class, 'apiClear'],             true],
+    ['POST',   '#^/api/plan/build-shopping-list$#',          [PlanController::class, 'apiBuildShopping'],     true],
+    ['PUT',    '#^/api/plan/(Mon|Tue|Wed|Thu|Fri|Sat|Sun)$#',[PlanController::class, 'apiSetDay'],            true],
 ];
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
