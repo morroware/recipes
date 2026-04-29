@@ -12,9 +12,9 @@ $stepsJson       = json_encode(array_column($recipe['steps'], 'text'), JSON_UNES
      data-base-servings="<?= (int)$recipe['servings'] ?>"
      data-units="metric">
   <div class="row no-print" style="margin-bottom: 20px; gap: 8px;">
-    <a class="btn btn-ghost" href="/">← All recipes</a>
+    <a class="btn btn-ghost" href="<?= h(url_for('/')) ?>">← All recipes</a>
     <div style="flex: 1"></div>
-    <a class="btn btn-sm" href="/recipes/<?= (int)$recipe['id'] ?>/edit">✏️ Edit</a>
+    <a class="btn btn-sm" href="<?= h(url_for('/recipes/' . (int)$recipe['id'] . '/edit')) ?>">✏️ Edit</a>
     <button class="btn btn-sm" type="button" data-action="print">🖨️ Print</button>
     <button class="btn btn-sm" type="button" data-action="add-to-shopping" data-recipe-id="<?= (int)$recipe['id'] ?>">🛒 Add to shopping</button>
     <button class="btn btn-sm <?= $isFav ? 'btn-coral' : '' ?>"
@@ -133,4 +133,4 @@ $stepsJson       = json_encode(array_column($recipe['steps'], 'text'), JSON_UNES
 
 <script type="application/json" data-bind="recipe-ingredients"><?= $ingredientsJson ?></script>
 <script type="application/json" data-bind="recipe-steps"><?= $stepsJson ?></script>
-<script type="module" src="/assets/js/detail.js"></script>
+<script type="module" src="<?= h(url_for('/assets/js/detail.js')) ?>"></script>

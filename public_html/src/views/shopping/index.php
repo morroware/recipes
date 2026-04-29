@@ -51,4 +51,4 @@ $total = count($items);
     </div>
   <?php endif; ?>
 </div>
-<script type="module" src="/assets/js/shopping.js"></script>
+<script type="module" src="<?= h(url_for('/assets/js/shopping.js')) ?>"></script>

@@ -11,7 +11,7 @@ define('DB_PATH',  APP_ROOT . '/db');
 // 1) Bounce to the installer until config.php exists.
 $configPath = APP_ROOT . '/config.php';
 if (!is_file($configPath)) {
-    header('Location: /install.php');
+    header('Location: ' . url_for('/install.php'));
     exit;
 }
 $CONFIG = require $configPath;
@@ -98,8 +98,12 @@ $routes = [
 ];
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
-$path   = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
-$path   = '/' . trim($path, '/');
+$reqPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+$base = app_base_path();
+if ($base !== '' && str_starts_with($reqPath, $base)) {
+    $reqPath = substr($reqPath, strlen($base)) ?: '/';
+}
+$path = '/' . trim($reqPath, '/');
 if ($path === '/index.php') $path = '/';
 
 foreach ($routes as [$m, $pattern, $handler, $needsLogin]) {

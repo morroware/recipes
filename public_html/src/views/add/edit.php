@@ -25,9 +25,9 @@ $d = [
 ?>
 <div class="page" data-page="add" data-mode="<?= h($mode) ?>" data-recipe-id="<?= (int)$d['id'] ?>">
   <div class="row no-print" style="margin-bottom: 20px;">
-    <a class="btn btn-ghost" href="/">← All recipes</a>
+    <a class="btn btn-ghost" href="<?= h(url_for('/')) ?>">← All recipes</a>
     <?php if ($isEdit): ?>
-      <a class="btn btn-ghost" href="/recipes/<?= (int)$d['id'] ?>">View recipe</a>
+      <a class="btn btn-ghost" href="<?= h(url_for('/recipes/' . (int)$d['id'])) ?>">View recipe</a>
       <span style="flex: 1"></span>
       <button type="button" class="btn btn-sm btn-ghost" data-js="delete-btn">🗑 Delete</button>
     <?php endif; ?>
@@ -159,4 +159,4 @@ $d = [
     </div>
   </form>
 </div>
-<script type="module" src="/assets/js/add.js"></script>
+<script type="module" src="<?= h(url_for('/assets/js/add.js')) ?>"></script>

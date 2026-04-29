@@ -1,6 +1,18 @@
 // public_html/assets/js/app.js
 // Shared utilities: API fetch wrapper with CSRF, toast, favorite handler.
 
+
+const appBasePath = () => {
+  const m = document.querySelector('meta[name="app-base-path"]');
+  return (m ? m.getAttribute('content') : '') || '';
+};
+
+export function appUrl(path = '/') {
+  const p = String(path || '/');
+  if (!p.startsWith('/')) return p;
+  return `${appBasePath()}${p}`;
+}
+
 const csrfToken = () => {
   const m = document.querySelector('meta[name="csrf-token"]');
   return m ? m.getAttribute('content') : '';
@@ -17,7 +29,7 @@ export async function apiFetch(url, opts = {}) {
   }
   let res;
   try {
-    res = await fetch(url, { ...opts, method, headers, credentials: 'same-origin' });
+    res = await fetch(appUrl(url), { ...opts, method, headers, credentials: 'same-origin' });
   } catch (e) {
     toast('Network error. Try again.', 'error');
     throw e;
@@ -76,7 +88,7 @@ document.addEventListener('click', async (e) => {
   if (!recipeId) return;
   btn.disabled = true;
   try {
-    const { data } = await apiFetch(`/api/recipes/${recipeId}/favorite`, { method: 'POST' });
+    const { data } = await apiFetch(appUrl(`/api/recipes/${recipeId}/favorite`), { method: 'POST' });
     const fav = !!(data && data.is_favorite);
     btn.classList.toggle('active', fav);
     btn.setAttribute('aria-pressed', fav ? 'true' : 'false');

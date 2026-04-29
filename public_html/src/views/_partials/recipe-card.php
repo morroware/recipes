@@ -6,7 +6,7 @@ $tagColors = TAG_PILL_COLORS;
 $tags = $recipe['tags'] ?? [];
 $isFav = !empty($recipe['is_favorite']);
 ?>
-<a class="recipe-card" href="/recipes/<?= (int)$recipe['id'] ?>" data-recipe-id="<?= (int)$recipe['id'] ?>" style="text-decoration: none; color: inherit;">
+<a class="recipe-card" href="<?= h(url_for('/recipes/' . (int)$recipe['id'])) ?>" data-recipe-id="<?= (int)$recipe['id'] ?>" style="text-decoration: none; color: inherit;">
   <div class="recipe-card-img <?= $showPhoto ? 'has-photo' : '' ?>"
        style="<?= $showPhoto
          ? 'background-image: url(' . h($recipe['photo_url']) . '); background-size: cover; background-position: center;'

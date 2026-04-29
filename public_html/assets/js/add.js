@@ -2,7 +2,7 @@
 // Add / edit recipe form. Vanilla form management — dynamic ingredient and
 // step editors, color/difficulty pickers, debounced save status.
 
-import { apiFetch, toast } from './app.js';
+import { apiFetch, toast, appUrl } from './app.js';
 
 const page = document.querySelector('[data-page="add"]');
 if (page) {
@@ -157,7 +157,7 @@ if (page) {
     try {
       await apiFetch(`/api/recipes/${recipeId}`, { method: 'DELETE' });
       toast('🗑 Deleted');
-      setTimeout(() => { location.href = '/'; }, 400);
+      setTimeout(() => { location.href = appUrl('/'); }, 400);
     } catch {}
   });
 }

@@ -25,10 +25,10 @@ $dateLabel = (new DateTime('today'))->format('l, F j');
   </div>
 
   <div class="row no-print" style="margin-bottom: 24px; gap: 6px;">
-    <a class="filter-chip <?= $mode === 'shopping' ? 'active' : '' ?>" href="/print?mode=shopping">🛒 Shopping list</a>
-    <a class="filter-chip <?= $mode === 'card'     ? 'active' : '' ?>" href="/print?mode=card<?= $cardId ? '&id=' . $cardId : '' ?>">🗂️ Recipe card (4×6)</a>
-    <a class="filter-chip <?= $mode === 'booklet'  ? 'active' : '' ?>" href="/print?mode=booklet<?= $bookletIds ? '&ids=' . implode(',', $bookletIds) : '' ?>">📚 Recipe booklet</a>
-    <a class="filter-chip <?= $mode === 'week'     ? 'active' : '' ?>" href="/print?mode=week">📅 Week's plan</a>
+    <a class="filter-chip <?= $mode === 'shopping' ? 'active' : '' ?>" href="<?= h(url_for('/print')) ?>?mode=shopping">🛒 Shopping list</a>
+    <a class="filter-chip <?= $mode === 'card'     ? 'active' : '' ?>" href="<?= h(url_for('/print')) ?>?mode=card<?= $cardId ? '&id=' . $cardId : '' ?>">🗂️ Recipe card (4×6)</a>
+    <a class="filter-chip <?= $mode === 'booklet'  ? 'active' : '' ?>" href="<?= h(url_for('/print')) ?>?mode=booklet<?= $bookletIds ? '&ids=' . implode(',', $bookletIds) : '' ?>">📚 Recipe booklet</a>
+    <a class="filter-chip <?= $mode === 'week'     ? 'active' : '' ?>" href="<?= h(url_for('/print')) ?>?mode=week">📅 Week's plan</a>
   </div>
 
   <?php if ($mode === 'shopping'): ?>
@@ -146,7 +146,7 @@ $dateLabel = (new DateTime('today'))->format('l, F j');
     <?php if (!$weekRecipes): ?>
       <div class="empty no-print">
         <div class="empty-glyph">📅</div>
-        <div>Nothing planned this week. <a href="/plan">Open the plan</a> to assign recipes.</div>
+        <div>Nothing planned this week. <a href="<?= h(url_for('/plan')) ?>">Open the plan</a> to assign recipes.</div>
       </div>
     <?php else: ?>
       <p class="muted no-print" style="margin-bottom: 16px;">
@@ -173,4 +173,4 @@ $dateLabel = (new DateTime('today'))->format('l, F j');
   'tags'         => $r['tags'] ?? [],
   'is_favorite'  => (int)($r['is_favorite'] ?? 0),
 ], $recipes), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
-<script type="module" src="/assets/js/print.js"></script>
+<script type="module" src="<?= h(url_for('/assets/js/print.js')) ?>"></script>

@@ -42,7 +42,7 @@ function require_login(): int {
     $uid = current_user_id();
     if ($uid === null) {
         $next = $_SERVER['REQUEST_URI'] ?? '/';
-        header('Location: /login?next=' . urlencode($next));
+        header('Location: ' . url_for('/login') . '?next=' . urlencode($next));
         exit;
     }
     return $uid;

@@ -16,7 +16,7 @@ if (is_file($configPath) && is_file($lockPath)) {
     http_response_code(403);
     echo install_layout('Installer locked',
         '<p>This installer has already run. Delete <code>public_html/db/install.lock</code> and <code>public_html/config.php</code> if you really want to reinstall.</p>'
-        . '<p><a href="/">Go to the app →</a></p>');
+        . '<p><a href="' . htmlspecialchars(install_url_for('/')) . '">Go to the app →</a></p>');
     exit;
 }
 
@@ -25,6 +25,7 @@ $errors  = [];
 $values  = [
     'db_host'    => $_POST['db_host']    ?? 'localhost',
     'db_name'    => $_POST['db_name']    ?? '',
+    'db_port'    => $_POST['db_port']    ?? '3306',
     'db_user'    => $_POST['db_user']    ?? '',
     'db_pass'    => $_POST['db_pass']    ?? '',
     'admin_email'=> $_POST['admin_email']?? '',
@@ -33,10 +34,13 @@ $values  = [
 ];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 'install') {
-    foreach (['db_host','db_name','db_user','admin_email','admin_pass'] as $req) {
+    foreach (['db_host','db_name','db_user','db_port','admin_email','admin_pass'] as $req) {
         if ($values[$req] === '') {
             $errors[] = "Missing field: {$req}";
         }
+    }
+    if (!ctype_digit((string)$values['db_port']) || (int)$values['db_port'] < 1 || (int)$values['db_port'] > 65535) {
+        $errors[] = 'Database port must be a number between 1 and 65535.';
     }
     if (!filter_var($values['admin_email'], FILTER_VALIDATE_EMAIL)) {
         $errors[] = 'Admin email is not a valid email address.';
@@ -48,7 +52,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 'install') {
     $pdo = null;
     if (!$errors) {
         try {
-            $dsn = "mysql:host={$values['db_host']};dbname={$values['db_name']};charset=utf8mb4";
+            $dsn = "mysql:host={$values['db_host']};port={$values['db_port']};dbname={$values['db_name']};charset=utf8mb4";
             $pdo = new PDO($dsn, $values['db_user'], $values['db_pass'], [
                 PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
@@ -101,6 +105,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 'install') {
                 'db' => [
                     'host'    => $values['db_host'],
                     'name'    => $values['db_name'],
+                    'port'    => (int)$values['db_port'],
                     'user'    => $values['db_user'],
                     'pass'    => $values['db_pass'],
                     'charset' => 'utf8mb4',
@@ -123,7 +128,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 'install') {
                 . ($ranSeeds  ? '<li>seeds.sql applied (12 recipes + pantry staples)</li>' : '<li><em>seeds.sql not present yet</em></li>')
                 . '<li>admin ' . htmlspecialchars($values['admin_email']) . ' ' . ($userExists ? 'updated' : 'created') . '</li>'
                 . '</ul>'
-                . '<p><strong>Next step:</strong> delete <code>install.php</code> from your server, then visit <a href="/">the app</a>.</p>');
+                . '<p><strong>Next step:</strong> delete <code>install.php</code> from your server, then visit <a href="' . htmlspecialchars(install_url_for('/')) . '">the app</a>.</p>');
             exit;
         } catch (Throwable $e) {
             $errors[] = 'Install failed: ' . $e->getMessage();
@@ -147,6 +152,7 @@ $body .= '<input type="hidden" name="step" value="install">';
 $body .= '<fieldset><legend>Database (cPanel → MySQL Databases)</legend>';
 $body .= field('Host',     'db_host', $values['db_host']);
 $body .= field('DB name',  'db_name', $values['db_name']);
+$body .= field('DB port',  'db_port', $values['db_port']);
 $body .= field('DB user',  'db_user', $values['db_user']);
 $body .= field('DB pass',  'db_pass', $values['db_pass'], 'password');
 $body .= '</fieldset>';
@@ -198,4 +204,13 @@ function install_layout(string $title, string $body): string {
 {$body}
 </body></html>
 HTML;
+}
+
+
+function install_url_for(string $path = '/'): string {
+    $path = '/' . ltrim($path, '/');
+    $script = $_SERVER['SCRIPT_NAME'] ?? '/install.php';
+    $dir = str_replace('\\', '/', dirname($script));
+    $base = ($dir === '/' || $dir === '.') ? '' : rtrim($dir, '/');
+    return $base . $path;
 }

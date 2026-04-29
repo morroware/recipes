@@ -38,3 +38,20 @@ const PLAN_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 /** Weekday recipe-card pill colors for tag rotation (mirrors pages-a.jsx). */
 const TAG_PILL_COLORS = ['pill-mint', 'pill-butter', 'pill-peach', 'pill-lilac', 'pill-sky', 'pill-blush'];
+
+
+function app_base_path(): string {
+    static $base = null;
+    if ($base !== null) return $base;
+
+    $script = $_SERVER['SCRIPT_NAME'] ?? '/index.php';
+    $dir = str_replace('\\', '/', dirname($script));
+    $dir = $dir === '/' || $dir === '.' ? '' : rtrim($dir, '/');
+    return $base = $dir;
+}
+
+function url_for(string $path = '/'): string {
+    $path = '/' . ltrim($path, '/');
+    $base = app_base_path();
+    return ($base === '' ? '' : $base) . $path;
+}

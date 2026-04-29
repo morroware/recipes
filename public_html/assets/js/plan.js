@@ -2,7 +2,7 @@
 // Meal plan: pick a recipe per day, clear day, clear week, build shopping list.
 // Uses the vanilla RecipePicker class for the modal picker.
 
-import { apiFetch, toast } from './app.js';
+import { apiFetch, toast, appUrl } from './app.js';
 import { RecipePicker } from './recipe-picker.js';
 
 const page = document.querySelector('[data-page="plan"]');
@@ -100,7 +100,7 @@ if (page) {
         toast('Plan is empty — assign recipes first', 'error');
       } else {
         toast(`🛒 Added ${added} ingredients from ${recipes} recipe${recipes === 1 ? '' : 's'}`);
-        setTimeout(() => { location.href = '/shopping'; }, 800);
+        setTimeout(() => { location.href = appUrl('/shopping'); }, 800);
       }
     } catch {} finally { btn.disabled = false; }
   });
