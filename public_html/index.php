@@ -57,13 +57,21 @@ $routes = [
     ['GET',  '#^/$#',                                        [RecipesController::class, 'browse'],     true],
     ['GET',  '#^/favorites$#',                               [RecipesController::class, 'favorites'],  true],
     ['GET',  '#^/recipes/(\d+)$#',                           [RecipesController::class, 'show'],       true],
+    ['GET',  '#^/recipes/(\d+)/edit$#',                      [RecipesController::class, 'editPage'],   true],
+    ['GET',  '#^/add$#',                                     [RecipesController::class, 'newPage'],    true],
     ['GET',  '#^/pantry$#',                                  [PantryController::class,  'page'],       true],
     ['GET',  '#^/shopping$#',                                [ShoppingController::class, 'page'],      true],
     ['GET',  '#^/plan$#',                                    [PlanController::class,     'page'],      true],
+    ['GET',  '#^/print$#',                                   [PrintController::class,    'page'],      true],
 
     // JSON API
+    ['POST', '#^/api/recipes$#',                             [RecipesController::class, 'apiCreate'],     true],
+    ['PUT',  '#^/api/recipes/(\d+)$#',                       [RecipesController::class, 'apiUpdate'],     true],
+    ['DELETE','#^/api/recipes/(\d+)$#',                      [RecipesController::class, 'apiDelete'],     true],
     ['POST', '#^/api/recipes/(\d+)/favorite$#',              [RecipesController::class, 'toggleFavorite'], true],
     ['PUT',  '#^/api/recipes/(\d+)/notes$#',                 [RecipesController::class, 'updateNotes'],    true],
+    ['GET',  '#^/api/settings$#',                            [SettingsController::class, 'apiGet'],     true],
+    ['PUT',  '#^/api/settings$#',                            [SettingsController::class, 'apiUpdate'],  true],
     ['GET',  '#^/api/recipes/suggestions$#',                 [PantryController::class,  'apiSuggestions'], true],
     ['GET',  '#^/api/recipes/by-ingredients$#',              [PantryController::class,  'apiByIngredients'], true],
 

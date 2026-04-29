@@ -5,8 +5,8 @@
 
 $tweaks = $tweaks ?? (function_exists('default_tweaks') ? default_tweaks() : [
     'density' => 'cozy', 'theme' => 'rainbow', 'mode' => 'light',
-    'fontPair' => 'default', 'radius' => 'default',
-    'stickerRotate' => 'on', 'dotGrid' => 'on',
+    'fontPair' => 'default', 'radius' => 'default', 'cardStyle' => 'mix',
+    'stickerRotate' => 'on', 'dotGrid' => 'on', 'units' => 'metric',
 ]);
 $title  = $title  ?? 'my little cookbook';
 $active = $active ?? '';
@@ -18,8 +18,10 @@ $active = $active ?? '';
       data-mode="<?= h($tweaks['mode']) ?>"
       data-fontpair="<?= h($tweaks['fontPair']) ?>"
       data-radius="<?= h($tweaks['radius']) ?>"
+      data-card-style="<?= h($tweaks['cardStyle'] ?? 'mix') ?>"
       data-sticker-rotate="<?= h($tweaks['stickerRotate']) ?>"
-      data-dot-grid="<?= h($tweaks['dotGrid']) ?>">
+      data-dot-grid="<?= h($tweaks['dotGrid']) ?>"
+      data-units="<?= h($tweaks['units'] ?? 'metric') ?>">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -39,5 +41,8 @@ $active = $active ?? '';
     <?php require $body_view; ?>
   </div>
   <script type="module" src="/assets/js/app.js"></script>
+  <?php if (function_exists('is_logged_in') && is_logged_in()): ?>
+    <script type="module" src="/assets/js/tweaks.js"></script>
+  <?php endif; ?>
 </body>
 </html>

@@ -52,28 +52,19 @@ $colors = STICKER_COLORS;
         <h2 id="picker-title">Plan <span data-js="picker-day"></span></h2>
         <button type="button" class="btn btn-sm" data-js="picker-close" aria-label="Close">✕</button>
       </div>
-      <div class="recipe-picker" style="height: 500px;">
-        <div class="recipe-picker-header">
-          <input class="search-input" placeholder="Search recipes…" data-js="picker-search" autocomplete="off">
-        </div>
-        <ul class="recipe-picker-list" data-js="picker-list" role="listbox">
-          <?php foreach ($recipes as $r): $rcolor = $colors[$r['color']] ?? $colors['mint']; ?>
-            <li class="recipe-picker-row"
-                data-recipe-id="<?= (int)$r['id'] ?>"
-                data-search="<?= h(strtolower($r['title'] . ' ' . $r['cuisine'])) ?>"
-                role="option"
-                tabindex="0">
-              <span class="recipe-picker-thumb" style="background: <?= h($rcolor['bg']) ?>;"><?= h($r['glyph']) ?></span>
-              <span class="recipe-picker-body">
-                <span class="recipe-picker-title"><?= h($r['title']) ?></span>
-                <span class="recipe-picker-meta"><?= h($r['cuisine']) ?> · <?= (int)$r['time_minutes'] ?>m</span>
-              </span>
-              <span class="recipe-picker-mark recipe-picker-mark-single"></span>
-            </li>
-          <?php endforeach; ?>
-        </ul>
-      </div>
+      <div data-js="picker-mount"></div>
     </div>
   </div>
 </div>
+<script type="application/json" data-bind="plan-recipes"><?= json_encode(array_map(fn($r) => [
+  'id'           => (int)$r['id'],
+  'title'        => $r['title'],
+  'cuisine'      => $r['cuisine'],
+  'time_minutes' => (int)$r['time_minutes'],
+  'servings'     => (int)$r['servings'],
+  'glyph'        => $r['glyph'],
+  'color'        => $r['color'],
+  'photo_url'    => $r['photo_url'] ?? null,
+  'tags'         => $r['tags'] ?? [],
+], $recipes), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
 <script type="module" src="/assets/js/plan.js"></script>

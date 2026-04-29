@@ -134,4 +134,243 @@ class Recipe {
         $upd->execute([$notes, $recipe_id, $user_id]);
         return $upd->rowCount() > 0;
     }
+
+    /**
+     * Create a recipe with ingredients/steps/tags. Returns the new recipe id.
+     * @throws InvalidArgumentException on bad input.
+     */
+    public static function create(int $user_id, array $data): int {
+        $clean = self::sanitize($data);
+        $pdo = db();
+        $pdo->beginTransaction();
+        try {
+            $slug = self::uniqueSlug($user_id, $clean['title']);
+            $stmt = $pdo->prepare(
+                'INSERT INTO recipes
+                    (user_id, slug, title, cuisine, summary, time_minutes, servings,
+                     difficulty, glyph, color, photo_url, notes, is_favorite)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)'
+            );
+            $stmt->execute([
+                $user_id, $slug, $clean['title'], $clean['cuisine'], $clean['summary'],
+                $clean['time_minutes'], $clean['servings'], $clean['difficulty'],
+                $clean['glyph'], $clean['color'], $clean['photo_url'], $clean['notes'],
+            ]);
+            $rid = (int)$pdo->lastInsertId();
+
+            self::writeIngredients($rid, $clean['ingredients']);
+            self::writeSteps($rid, $clean['steps']);
+            self::writeTags($rid, $clean['tags']);
+
+            $pdo->commit();
+            return $rid;
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+    }
+
+    public static function updateFull(int $user_id, int $recipe_id, array $data): bool {
+        $existing = self::findFull($user_id, $recipe_id);
+        if (!$existing) return false;
+        $clean = self::sanitize($data);
+
+        $pdo = db();
+        $pdo->beginTransaction();
+        try {
+            $slug = $existing['slug'];
+            if ($clean['title'] !== $existing['title']) {
+                $slug = self::uniqueSlug($user_id, $clean['title'], $recipe_id);
+            }
+            $stmt = $pdo->prepare(
+                'UPDATE recipes
+                    SET slug = ?, title = ?, cuisine = ?, summary = ?,
+                        time_minutes = ?, servings = ?, difficulty = ?,
+                        glyph = ?, color = ?, photo_url = ?, notes = ?
+                  WHERE id = ? AND user_id = ?'
+            );
+            $stmt->execute([
+                $slug, $clean['title'], $clean['cuisine'], $clean['summary'],
+                $clean['time_minutes'], $clean['servings'], $clean['difficulty'],
+                $clean['glyph'], $clean['color'], $clean['photo_url'], $clean['notes'],
+                $recipe_id, $user_id,
+            ]);
+
+            $pdo->prepare('DELETE FROM ingredients WHERE recipe_id = ?')->execute([$recipe_id]);
+            $pdo->prepare('DELETE FROM steps WHERE recipe_id = ?')->execute([$recipe_id]);
+            $pdo->prepare('DELETE FROM recipe_tags WHERE recipe_id = ?')->execute([$recipe_id]);
+
+            self::writeIngredients($recipe_id, $clean['ingredients']);
+            self::writeSteps($recipe_id, $clean['steps']);
+            self::writeTags($recipe_id, $clean['tags']);
+
+            $pdo->commit();
+            return true;
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+    }
+
+    public static function delete(int $user_id, int $recipe_id): bool {
+        $stmt = db()->prepare('DELETE FROM recipes WHERE id = ? AND user_id = ?');
+        $stmt->execute([$recipe_id, $user_id]);
+        return $stmt->rowCount() > 0;
+    }
+
+    // ---- internals ---------------------------------------------------------
+
+    private static function sanitize(array $data): array {
+        $colors = ['mint','butter','peach','lilac','sky','blush','lime','coral'];
+        $diffs  = ['Easy','Medium','Hard'];
+
+        $title = trim((string)($data['title'] ?? ''));
+        if ($title === '') throw new InvalidArgumentException('title_required');
+        if (mb_strlen($title) > 160) throw new InvalidArgumentException('title_too_long');
+
+        $cuisine = trim((string)($data['cuisine'] ?? ''));
+        $summary = (string)($data['summary'] ?? '');
+        $notes   = (string)($data['notes'] ?? '');
+
+        $time = (int)($data['time_minutes'] ?? $data['time'] ?? 30);
+        if ($time < 0 || $time > 24 * 60) throw new InvalidArgumentException('time_invalid');
+
+        $servings = (int)($data['servings'] ?? 2);
+        if ($servings < 1 || $servings > 100) throw new InvalidArgumentException('servings_invalid');
+
+        $difficulty = (string)($data['difficulty'] ?? 'Easy');
+        if (!in_array($difficulty, $diffs, true)) $difficulty = 'Easy';
+
+        $color = (string)($data['color'] ?? 'mint');
+        if (!in_array($color, $colors, true)) $color = 'mint';
+
+        $glyph = trim((string)($data['glyph'] ?? '🍽️'));
+        if ($glyph === '') $glyph = '🍽️';
+        if (mb_strlen($glyph) > 8) $glyph = mb_substr($glyph, 0, 8);
+
+        $photo = trim((string)($data['photo_url'] ?? ''));
+        if ($photo !== '' && !preg_match('#^(https?://|/)#i', $photo)) {
+            throw new InvalidArgumentException('photo_url_invalid');
+        }
+
+        // Ingredients
+        $ingredients = [];
+        $rawIng = $data['ingredients'] ?? [];
+        if (is_array($rawIng)) {
+            foreach ($rawIng as $i) {
+                $name = trim((string)($i['name'] ?? ''));
+                if ($name === '') continue;
+                $qty = $i['qty'] ?? null;
+                if ($qty !== null && $qty !== '') $qty = (string)$qty;
+                $aisle = (string)($i['aisle'] ?? 'Other');
+                if (!in_array($aisle, AISLES, true)) $aisle = 'Other';
+                $ingredients[] = [
+                    'name'  => mb_substr($name, 0, 128),
+                    'qty'   => ($qty === '' || $qty === null) ? null : $qty,
+                    'unit'  => mb_substr((string)($i['unit'] ?? ''), 0, 16),
+                    'aisle' => $aisle,
+                ];
+            }
+        }
+
+        // Steps
+        $steps = [];
+        $rawSteps = $data['steps'] ?? [];
+        if (is_array($rawSteps)) {
+            foreach ($rawSteps as $s) {
+                $text = is_array($s) ? (string)($s['text'] ?? '') : (string)$s;
+                $text = trim($text);
+                if ($text === '') continue;
+                $steps[] = $text;
+            }
+        }
+
+        // Tags
+        $tags = [];
+        $rawTags = $data['tags'] ?? [];
+        if (is_string($rawTags)) {
+            $rawTags = array_map('trim', explode(',', $rawTags));
+        }
+        if (is_array($rawTags)) {
+            foreach ($rawTags as $t) {
+                $t = trim((string)$t);
+                if ($t === '') continue;
+                if (!in_array($t, $tags, true)) $tags[] = mb_substr($t, 0, 64);
+            }
+        }
+
+        return [
+            'title'        => mb_substr($title, 0, 160),
+            'cuisine'      => mb_substr($cuisine, 0, 64),
+            'summary'      => $summary,
+            'time_minutes' => $time,
+            'servings'     => $servings,
+            'difficulty'   => $difficulty,
+            'glyph'        => $glyph,
+            'color'        => $color,
+            'photo_url'    => $photo === '' ? null : $photo,
+            'notes'        => $notes,
+            'ingredients'  => $ingredients,
+            'steps'        => $steps,
+            'tags'         => $tags,
+        ];
+    }
+
+    private static function writeIngredients(int $recipe_id, array $ingredients): void {
+        if (!$ingredients) return;
+        $stmt = db()->prepare(
+            'INSERT INTO ingredients (recipe_id, position, qty, unit, name, aisle)
+             VALUES (?, ?, ?, ?, ?, ?)'
+        );
+        foreach ($ingredients as $i => $ing) {
+            $stmt->execute([$recipe_id, $i, $ing['qty'], $ing['unit'], $ing['name'], $ing['aisle']]);
+        }
+    }
+
+    private static function writeSteps(int $recipe_id, array $steps): void {
+        if (!$steps) return;
+        $stmt = db()->prepare(
+            'INSERT INTO steps (recipe_id, position, text) VALUES (?, ?, ?)'
+        );
+        foreach ($steps as $i => $text) {
+            $stmt->execute([$recipe_id, $i, $text]);
+        }
+    }
+
+    private static function writeTags(int $recipe_id, array $tags): void {
+        if (!$tags) return;
+        $stmt = db()->prepare(
+            'INSERT IGNORE INTO recipe_tags (recipe_id, tag) VALUES (?, ?)'
+        );
+        foreach ($tags as $t) {
+            $stmt->execute([$recipe_id, $t]);
+        }
+    }
+
+    private static function uniqueSlug(int $user_id, string $title, ?int $exclude_id = null): string {
+        $base = preg_replace('/[^a-z0-9]+/', '-', mb_strtolower($title)) ?: 'recipe';
+        $base = trim($base, '-');
+        if ($base === '') $base = 'recipe';
+        $base = mb_substr($base, 0, 50);
+
+        $slug = $base;
+        $n = 1;
+        while (self::slugExists($user_id, $slug, $exclude_id)) {
+            $n++;
+            $slug = $base . '-' . $n;
+            if ($n > 200) { $slug = $base . '-' . substr(bin2hex(random_bytes(3)), 0, 6); break; }
+        }
+        return $slug;
+    }
+
+    private static function slugExists(int $user_id, string $slug, ?int $exclude_id): bool {
+        if ($exclude_id) {
+            $stmt = db()->prepare('SELECT 1 FROM recipes WHERE user_id = ? AND slug = ? AND id <> ? LIMIT 1');
+            $stmt->execute([$user_id, $slug, $exclude_id]);
+        } else {
+            $stmt = db()->prepare('SELECT 1 FROM recipes WHERE user_id = ? AND slug = ? LIMIT 1');
+            $stmt->execute([$user_id, $slug]);
+        }
+        return (bool)$stmt->fetch();
+    }
 }

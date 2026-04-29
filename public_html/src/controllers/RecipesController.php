@@ -71,4 +71,75 @@ class RecipesController {
         Recipe::setNotes($uid, (int)$id, $notes);
         json_ok(['saved' => true]);
     }
+
+    // ---- Add / Edit pages --------------------------------------------------
+
+    public function newPage(): void {
+        require_login();
+        render('add/edit.php', [
+            'title'  => 'add a recipe · my little cookbook',
+            'active' => 'add',
+            'recipe' => null,
+            'mode'   => 'create',
+        ]);
+    }
+
+    public function editPage(string $id): void {
+        $uid = require_login();
+        $recipe = Recipe::findFull($uid, (int)$id);
+        if (!$recipe) {
+            http_response_code(404);
+            $title = 'Recipe not found';
+            $body_view = SRC_PATH . '/views/_404_body.php';
+            require SRC_PATH . '/views/layout.php';
+            return;
+        }
+        render('add/edit.php', [
+            'title'  => 'edit · ' . $recipe['title'],
+            'active' => '',
+            'recipe' => $recipe,
+            'mode'   => 'edit',
+        ]);
+    }
+
+    // ---- API: create / update / delete -------------------------------------
+
+    public function apiCreate(): void {
+        $uid = require_login();
+        csrf_require();
+        $body = self::readJson();
+        try {
+            $rid = Recipe::create($uid, $body);
+        } catch (InvalidArgumentException $e) {
+            json_err($e->getMessage(), 422);
+        }
+        json_ok(['id' => $rid]);
+    }
+
+    public function apiUpdate(string $id): void {
+        $uid = require_login();
+        csrf_require();
+        $body = self::readJson();
+        try {
+            $ok = Recipe::updateFull($uid, (int)$id, $body);
+        } catch (InvalidArgumentException $e) {
+            json_err($e->getMessage(), 422);
+        }
+        if (!$ok) json_err('not_found', 404);
+        json_ok(['id' => (int)$id]);
+    }
+
+    public function apiDelete(string $id): void {
+        $uid = require_login();
+        csrf_require();
+        if (!Recipe::delete($uid, (int)$id)) json_err('not_found', 404);
+        json_ok(['deleted' => true]);
+    }
+
+    private static function readJson(): array {
+        $raw = file_get_contents('php://input');
+        if (!$raw) return [];
+        $data = json_decode($raw, true);
+        return is_array($data) ? $data : [];
+    }
 }
