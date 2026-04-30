@@ -101,6 +101,7 @@ $routes = [
     // AI (Claude) endpoints
     ['GET',  '#^/api/ai/status$#',                           [AiController::class, 'apiStatus'],              true],
     ['POST', '#^/api/ai/chat$#',                             [AiController::class, 'apiChat'],                true],
+    ['POST', '#^/api/ai/undo$#',                             [AiController::class, 'apiUndo'],                true],
     ['POST', '#^/api/ai/parse-ingredients$#',                [AiController::class, 'apiParseIngredients'],    true],
     ['POST', '#^/api/ai/parse-recipe$#',                     [AiController::class, 'apiParseRecipe'],         true],
     ['POST', '#^/api/ai/recipe-suggestions$#',               [AiController::class, 'apiRecipeSuggestions'],   true],

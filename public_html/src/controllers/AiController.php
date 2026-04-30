@@ -30,6 +30,32 @@ class AiController {
         ]);
     }
 
+    /**
+     * POST /api/ai/undo  — replay the inverse of a prior reversible tool call.
+     * Used by the in-chat "Undo" button so the user doesn't have to spend a
+     * model turn just to reverse one click.
+     */
+    public function apiUndo(): void {
+        $uid = require_login();
+        csrf_require();
+        $body  = self::readJson();
+        $token = trim((string)($body['token'] ?? ''));
+        if ($token === '') json_err('token_required', 422);
+
+        $row = ToolAudit::findByUndoToken($uid, $token);
+        if (!$row) json_err('token_not_found_or_already_used', 404);
+        $payload = is_string($row['undo_payload']) ? json_decode($row['undo_payload'], true) : null;
+        if (!is_array($payload) || empty($payload['op'])) json_err('no_undo_payload', 422);
+
+        $res = $this->reverseAction($uid, $payload);
+        if (!empty($res['ok'])) ToolAudit::markReversed($uid, (int)$row['id']);
+        // Mirror the audit pattern from chat tool calls so timeline stays complete.
+        try {
+            ToolAudit::record($uid, null, 'undo', ['token' => $token], $res, !empty($res['ok']));
+        } catch (Throwable $_) {}
+        json_ok($res);
+    }
+
     // ---- Memories ----------------------------------------------------------
 
     public function apiMemoriesList(): void {
@@ -425,7 +451,17 @@ class AiController {
                  . "- Prefer recipes already in the library when relevant.\n"
                  . "- You also have a `web_search` tool. Use it when the user asks for new recipe ideas to expand beyond their library, when their pantry has unusual ingredients you don't recognise, or when they ask for something specific (\"a real Cantonese congee recipe\"). Search for credible recipe sources (food blogs, cooking sites). Summarise the top 2–4 hits as a friendly bullet list with title, source name, time, and one-line why-it-fits — include the URL each time. Never fabricate a recipe and pretend you found it online.\n"
                  . "- When the user picks one of your web search results to keep: (1) compose a complete structured recipe (title, cuisine, summary, time_minutes, servings, difficulty, glyph emoji, color from mint|butter|peach|lilac|sky|blush|lime|coral, tags, ingredients with qty/unit/name/aisle, ordered steps) faithfully reflecting the source. (2) Call `save_recipe_to_book` with confirm=false to preview. (3) After the user explicitly says yes, call again with the SAME recipe and confirm=true. Always include `source_url` so they can revisit the original.\n"
-                 . "- A separate `# Current view` system block (when present) shows exactly what the user is looking at right now (page, current recipe, visible items, selected text). Treat it as ground truth: when they say \"this recipe\", \"these items\", \"halve it\", \"organise this list\", use that block as the antecedent. Don't ask them to repeat what's already on screen.\n";
+                 . "- A separate `# Current view` system block (when present) shows exactly what the user is looking at right now (page, current recipe, visible items, selected text). Treat it as ground truth: when they say \"this recipe\", \"these items\", \"halve it\", \"organise this list\", use that block as the antecedent. Don't ask them to repeat what's already on screen.\n"
+                 . "\n"
+                 . "Action tools (you can DO things, not just talk):\n"
+                 . "- Recipes: `open_recipe`, `update_recipe` (metadata patch), `update_recipe_ingredients`, `update_recipe_steps`, `scale_recipe` (preview by default — set save=true+confirm=true to persist), `substitute_ingredient` (respect allergies/diet — refuse swaps that violate them), `toggle_favorite` (instant + reversible), `delete_recipe` (preview/commit + ask the user to repeat the title).\n"
+                 . "- Pantry: `pantry_search`, `pantry_set_in_stock`, `pantry_restock` (when they bought something), `pantry_remove` (preview/commit; prefer set_in_stock=false unless they really want it gone), `pantry_update`.\n"
+                 . "- Shopping: `shopping_check`, `shopping_clear_checked` (preview/commit), `shopping_organize_by_aisle` (you provide full {id,aisle} assignments), `shopping_build_from_plan`, `shopping_remove`.\n"
+                 . "- Plan: `plan_clear_day`, `plan_clear_week` (preview/commit), `plan_swap_days`, `apply_week_plan` (preview/commit; values must be recipe ids — call `recipe_search` first to find them).\n"
+                 . "- Settings/nav: `set_user_settings` (theme/mode/density/font/radius/units; reloads the page), `navigate` (whitelisted routes only).\n"
+                 . "- Reversal: every reversible commit returns an `undo_token`. The user may already see an Undo button in the UI — but if they say \"undo that\", call the `undo` tool with the matching token.\n"
+                 . "- For every preview/commit tool: call ONCE with confirm=false, present the diff/summary in plain language, ASK YES/NO, then call AGAIN with confirm=true ONLY after they explicitly agree.\n"
+                 . "- For destructive operations (`delete_recipe`, `pantry_remove`, `plan_clear_week`, `shopping_clear_checked`), ALWAYS preview first; never skip straight to confirm=true.\n";
 
         $systemBlocks = [
             ['type' => 'text', 'text' => $stableSystem, 'cache_control' => ['type' => 'ephemeral']],
@@ -476,7 +512,7 @@ class AiController {
             foreach ($toolUses as $tu) {
                 $name  = (string)($tu['name'] ?? '');
                 $input = is_array($tu['input'] ?? null) ? $tu['input'] : [];
-                $resultPayload = $this->executeTool($uid, $name, $input);
+                $resultPayload = $this->dispatchTool($uid, $convId, $name, $input);
                 $actions[] = ['tool' => $name, 'input' => $input, 'result' => $resultPayload];
                 $resultBlocks[] = [
                     'type'        => 'tool_result',
@@ -499,8 +535,29 @@ class AiController {
         ]);
     }
 
+    /**
+     * Wrap executeTool with audit + undo plumbing. Every tool call lands in
+     * `ai_tool_audit`; reversible commits get an `undo_token` that the user
+     * can later replay via the `undo` tool.
+     */
+    private function dispatchTool(int $uid, ?int $convId, string $name, array $input): array {
+        $result = $this->executeTool($uid, $convId, $name, $input);
+        try {
+            $token   = isset($result['undo_token']) ? (string)$result['undo_token'] : null;
+            $payload = isset($result['_undo']) && is_array($result['_undo']) ? $result['_undo'] : null;
+            unset($result['_undo']); // never leak the inverse-op recipe to the model
+            ToolAudit::record(
+                $uid, $convId, $name, $input, $result,
+                !empty($result['ok']), $token, $payload
+            );
+        } catch (Throwable $_) {
+            // Never let audit failures block the user.
+        }
+        return $result;
+    }
+
     /** Execute a tool the chat model requested. Always returns a JSON-serialisable array. */
-    private function executeTool(int $uid, string $name, array $input): array {
+    private function executeTool(int $uid, ?int $convId, string $name, array $input): array {
         try {
             switch ($name) {
                 case 'recipe_search':
@@ -668,6 +725,438 @@ class AiController {
                         isset($input['notes']) ? (string)$input['notes'] : null
                     );
                     return ['ok' => true, 'log_id' => (int)$row['id']];
+
+                // ---- Phase 2: Recipes -----------------------------------------
+                case 'open_recipe': {
+                    $rid = (int)($input['id'] ?? 0);
+                    $r = $rid > 0 ? Recipe::findById($uid, $rid) : null;
+                    if (!$r) return ['ok' => false, 'error' => 'recipe_not_found'];
+                    return [
+                        'ok'           => true,
+                        'navigate_to'  => url_for('/recipes/' . $rid),
+                        'recipe_id'    => $rid,
+                        'title'        => (string)$r['title'],
+                    ];
+                }
+
+                case 'update_recipe':
+                    return self::execUpdateRecipe($uid, $input);
+
+                case 'update_recipe_ingredients':
+                    return self::execUpdateRecipeIngredients($uid, $input);
+
+                case 'update_recipe_steps':
+                    return self::execUpdateRecipeSteps($uid, $input);
+
+                case 'scale_recipe':
+                    return self::execScaleRecipe($uid, $input);
+
+                case 'substitute_ingredient':
+                    return self::execSubstituteIngredient($uid, $input);
+
+                case 'toggle_favorite': {
+                    $rid = (int)($input['id'] ?? 0);
+                    $next = Recipe::toggleFavorite($uid, $rid);
+                    if ($next === null) return ['ok' => false, 'error' => 'recipe_not_found'];
+                    return [
+                        'ok'          => true,
+                        'recipe_id'   => $rid,
+                        'is_favorite' => (bool)$next,
+                        'undo_token'  => ToolAudit::newToken(),
+                        '_undo'       => ['op' => 'toggle_favorite', 'id' => $rid],
+                    ];
+                }
+
+                case 'delete_recipe': {
+                    $rid     = (int)($input['id'] ?? 0);
+                    $confirm = !empty($input['confirm']);
+                    $r = $rid > 0 ? Recipe::findById($uid, $rid) : null;
+                    if (!$r) return ['ok' => false, 'error' => 'recipe_not_found'];
+                    if (!$confirm) {
+                        return [
+                            'ok'      => true,
+                            'preview' => true,
+                            'recipe_id' => $rid,
+                            'title'   => (string)$r['title'],
+                            'note'    => 'Preview only. The user must clearly say yes (and ideally repeat the recipe title) before you call this with confirm=true. Deletion can\'t be undone.',
+                        ];
+                    }
+                    if (!Recipe::delete($uid, $rid)) return ['ok' => false, 'error' => 'delete_failed'];
+                    return ['ok' => true, 'committed' => true, 'recipe_id' => $rid, 'title' => (string)$r['title']];
+                }
+
+                // ---- Phase 2: Pantry ------------------------------------------
+                case 'pantry_search': {
+                    $query = mb_strtolower(trim((string)($input['query'] ?? '')));
+                    $items = Pantry::listForUser($uid);
+                    $out = [];
+                    foreach ($items as $it) {
+                        if ($query !== '' && mb_stripos((string)$it['name'], $query) === false) continue;
+                        if (array_key_exists('in_stock', $input)) {
+                            $want = (bool)$input['in_stock'];
+                            if ((bool)$it['in_stock'] !== $want) continue;
+                        }
+                        $out[] = [
+                            'id'       => (int)$it['id'],
+                            'name'     => (string)$it['name'],
+                            'category' => (string)$it['category'],
+                            'in_stock' => (bool)$it['in_stock'],
+                            'qty'      => $it['qty'],
+                            'unit'     => (string)$it['unit'],
+                            'purchase_count' => (int)$it['purchase_count'],
+                        ];
+                        if (count($out) >= 30) break;
+                    }
+                    return ['ok' => true, 'count' => count($out), 'items' => $out];
+                }
+
+                case 'pantry_set_in_stock': {
+                    $id = (int)($input['id'] ?? 0);
+                    $want = (bool)($input['in_stock'] ?? false);
+                    $existing = Pantry::findById($uid, $id);
+                    if (!$existing) return ['ok' => false, 'error' => 'pantry_item_not_found'];
+                    $prev = (bool)$existing['in_stock'];
+                    $row = Pantry::update($uid, $id, ['in_stock' => $want]);
+                    if (!$row) return ['ok' => false, 'error' => 'update_failed'];
+                    return [
+                        'ok'         => true,
+                        'item'       => ['id' => $id, 'name' => $existing['name'], 'in_stock' => $want],
+                        'undo_token' => ToolAudit::newToken(),
+                        '_undo'      => ['op' => 'pantry_set_in_stock', 'id' => $id, 'prev_in_stock' => $prev],
+                    ];
+                }
+
+                case 'pantry_restock': {
+                    $id = (int)($input['id'] ?? 0);
+                    $existing = Pantry::findById($uid, $id);
+                    if (!$existing) return ['ok' => false, 'error' => 'pantry_item_not_found'];
+                    $row = Pantry::restockById($uid, $id);
+                    if (!$row) return ['ok' => false, 'error' => 'restock_failed'];
+                    return [
+                        'ok'         => true,
+                        'item'       => ['id' => $id, 'name' => $row['name'], 'in_stock' => true],
+                        'undo_token' => ToolAudit::newToken(),
+                        '_undo'      => [
+                            'op' => 'pantry_restock',
+                            'id' => $id,
+                            'prev_in_stock' => (bool)$existing['in_stock'],
+                            'prev_count'    => (int)$existing['purchase_count'],
+                            'prev_last_bought' => $existing['last_bought'],
+                        ],
+                    ];
+                }
+
+                case 'pantry_remove': {
+                    $id      = (int)($input['id'] ?? 0);
+                    $confirm = !empty($input['confirm']);
+                    $existing = Pantry::findById($uid, $id);
+                    if (!$existing) return ['ok' => false, 'error' => 'pantry_item_not_found'];
+                    if (!$confirm) {
+                        return [
+                            'ok'      => true,
+                            'preview' => true,
+                            'item'    => ['id' => $id, 'name' => $existing['name'], 'category' => $existing['category']],
+                            'note'    => 'Preview only — confirm=true to actually delete. (Removing destroys purchase history; if they just ran out, prefer pantry_set_in_stock with in_stock=false.)',
+                        ];
+                    }
+                    if (!Pantry::delete($uid, $id)) return ['ok' => false, 'error' => 'delete_failed'];
+                    return ['ok' => true, 'committed' => true, 'pantry_id' => $id, 'name' => (string)$existing['name']];
+                }
+
+                case 'pantry_update': {
+                    $id   = (int)($input['id'] ?? 0);
+                    $existing = Pantry::findById($uid, $id);
+                    if (!$existing) return ['ok' => false, 'error' => 'pantry_item_not_found'];
+                    $patch = [];
+                    if (array_key_exists('qty', $input))      $patch['qty']      = $input['qty'];
+                    if (array_key_exists('unit', $input))     $patch['unit']     = (string)$input['unit'];
+                    if (array_key_exists('category', $input)) $patch['category'] = (string)$input['category'];
+                    if (!$patch) return ['ok' => false, 'error' => 'empty_patch'];
+                    $row = Pantry::update($uid, $id, $patch);
+                    if (!$row) return ['ok' => false, 'error' => 'update_failed'];
+                    return [
+                        'ok'         => true,
+                        'item'       => ['id' => $id, 'name' => $row['name'], 'qty' => $row['qty'], 'unit' => $row['unit'], 'category' => $row['category']],
+                        'undo_token' => ToolAudit::newToken(),
+                        '_undo'      => [
+                            'op' => 'pantry_update',
+                            'id' => $id,
+                            'prev' => [
+                                'qty'      => $existing['qty'],
+                                'unit'     => $existing['unit'],
+                                'category' => $existing['category'],
+                            ],
+                        ],
+                    ];
+                }
+
+                // ---- Phase 2: Shopping ----------------------------------------
+                case 'shopping_check': {
+                    $id   = (int)($input['id'] ?? 0);
+                    $want = (bool)($input['checked'] ?? false);
+                    $existing = Shopping::findById($uid, $id);
+                    if (!$existing) return ['ok' => false, 'error' => 'shopping_item_not_found'];
+                    $row = Shopping::update($uid, $id, ['checked' => $want]);
+                    if (!$row) return ['ok' => false, 'error' => 'update_failed'];
+                    return [
+                        'ok'         => true,
+                        'item'       => ['id' => $id, 'name' => $existing['name'], 'checked' => $want],
+                        'undo_token' => ToolAudit::newToken(),
+                        '_undo'      => ['op' => 'shopping_check', 'id' => $id, 'prev' => (int)$existing['checked'] === 1],
+                    ];
+                }
+
+                case 'shopping_clear_checked': {
+                    $confirm = !empty($input['confirm']);
+                    $items = Shopping::listForUser($uid);
+                    $checked = array_values(array_filter($items, fn($i) => (int)$i['checked'] === 1));
+                    if (!$checked) return ['ok' => true, 'committed' => true, 'removed' => 0, 'note' => 'Nothing to clear.'];
+                    if (!$confirm) {
+                        $names = array_map(fn($i) => (string)$i['name'], array_slice($checked, 0, 12));
+                        return [
+                            'ok' => true, 'preview' => true,
+                            'count' => count($checked),
+                            'sample' => $names,
+                            'note' => 'Preview only — confirm=true to remove all checked items.',
+                        ];
+                    }
+                    $removed = 0;
+                    foreach ($checked as $i) {
+                        if (Shopping::delete($uid, (int)$i['id'])) $removed++;
+                    }
+                    return ['ok' => true, 'committed' => true, 'removed' => $removed];
+                }
+
+                case 'shopping_organize_by_aisle': {
+                    $assigns = is_array($input['assignments'] ?? null) ? $input['assignments'] : [];
+                    $confirm = !empty($input['confirm']);
+                    $items = Shopping::listForUser($uid);
+                    $byId  = [];
+                    foreach ($items as $i) $byId[(int)$i['id']] = $i;
+
+                    $clean = [];
+                    foreach ($assigns as $a) {
+                        if (!is_array($a)) continue;
+                        $iid = (int)($a['id'] ?? 0);
+                        $aisle = (string)($a['aisle'] ?? '');
+                        if (!isset($byId[$iid])) continue;
+                        if (!in_array($aisle, AISLES, true)) $aisle = 'Other';
+                        $clean[] = ['id' => $iid, 'aisle' => $aisle, 'name' => $byId[$iid]['name']];
+                    }
+                    if (!$clean) return ['ok' => false, 'error' => 'no_valid_assignments'];
+
+                    if (!$confirm) {
+                        $byAisle = [];
+                        foreach ($clean as $c) $byAisle[$c['aisle']][] = $c['name'];
+                        return [
+                            'ok' => true, 'preview' => true,
+                            'by_aisle' => $byAisle,
+                            'count' => count($clean),
+                            'note' => 'Preview only — confirm=true to commit. The list will be reordered so same-aisle items group together.',
+                        ];
+                    }
+
+                    // Stable order: aisle order from AISLES, then current position.
+                    $aisleOrder = array_flip(AISLES);
+                    usort($clean, function($a, $b) use ($aisleOrder, $byId) {
+                        $oa = $aisleOrder[$a['aisle']] ?? 99;
+                        $ob = $aisleOrder[$b['aisle']] ?? 99;
+                        if ($oa !== $ob) return $oa - $ob;
+                        return ((int)$byId[$a['id']]['position']) - ((int)$byId[$b['id']]['position']);
+                    });
+
+                    $pdo = db();
+                    $pdo->beginTransaction();
+                    try {
+                        $pos = 1;
+                        foreach ($clean as $c) {
+                            $stmt = $pdo->prepare(
+                                'UPDATE shopping_items SET aisle = ?, position = ? WHERE id = ? AND user_id = ?'
+                            );
+                            $stmt->execute([$c['aisle'], $pos, $c['id'], $uid]);
+                            $pos++;
+                        }
+                        $pdo->commit();
+                    } catch (Throwable $e) {
+                        $pdo->rollBack();
+                        return ['ok' => false, 'error' => 'reorder_failed', 'message' => $e->getMessage()];
+                    }
+                    return ['ok' => true, 'committed' => true, 'count' => count($clean)];
+                }
+
+                case 'shopping_build_from_plan': {
+                    $res = Plan::buildShoppingList($uid);
+                    return ['ok' => true, 'added' => (int)($res['added'] ?? 0), 'recipes' => (int)($res['recipes'] ?? 0)];
+                }
+
+                case 'shopping_remove': {
+                    $id = (int)($input['id'] ?? 0);
+                    $existing = Shopping::findById($uid, $id);
+                    if (!$existing) return ['ok' => false, 'error' => 'shopping_item_not_found'];
+                    if (!Shopping::delete($uid, $id)) return ['ok' => false, 'error' => 'delete_failed'];
+                    return [
+                        'ok'         => true,
+                        'shopping_id'=> $id,
+                        'name'       => (string)$existing['name'],
+                        'undo_token' => ToolAudit::newToken(),
+                        '_undo'      => ['op' => 'shopping_remove', 'snapshot' => $existing],
+                    ];
+                }
+
+                // ---- Phase 2: Plan --------------------------------------------
+                case 'plan_clear_day': {
+                    $day = (string)($input['day'] ?? '');
+                    if (!in_array($day, PLAN_DAYS, true)) return ['ok' => false, 'error' => 'bad_day'];
+                    $byDay = Plan::forUser($uid);
+                    $prev  = $byDay[$day] ?? null;
+                    Plan::setDay($uid, $day, null);
+                    return [
+                        'ok'         => true,
+                        'day'        => $day,
+                        'undo_token' => ToolAudit::newToken(),
+                        '_undo'      => ['op' => 'plan_clear_day', 'day' => $day, 'prev_recipe_id' => $prev ? (int)$prev['id'] : null],
+                    ];
+                }
+
+                case 'plan_clear_week': {
+                    $confirm = !empty($input['confirm']);
+                    $byDay = Plan::forUser($uid);
+                    $prev = [];
+                    foreach ($byDay as $d => $entry) {
+                        if ($entry) $prev[$d] = (int)$entry['id'];
+                    }
+                    if (!$confirm) {
+                        return [
+                            'ok' => true, 'preview' => true,
+                            'count' => count($prev),
+                            'days' => array_keys($prev),
+                            'note' => 'Preview only — confirm=true to wipe the week.',
+                        ];
+                    }
+                    Plan::clearAll($uid);
+                    return [
+                        'ok'         => true,
+                        'committed'  => true,
+                        'cleared'    => count($prev),
+                        'undo_token' => ToolAudit::newToken(),
+                        '_undo'      => ['op' => 'plan_clear_week', 'prev' => $prev],
+                    ];
+                }
+
+                case 'plan_swap_days': {
+                    $a = (string)($input['a'] ?? '');
+                    $b = (string)($input['b'] ?? '');
+                    if (!in_array($a, PLAN_DAYS, true) || !in_array($b, PLAN_DAYS, true)) {
+                        return ['ok' => false, 'error' => 'bad_day'];
+                    }
+                    if ($a === $b) return ['ok' => false, 'error' => 'same_day'];
+                    $byDay = Plan::forUser($uid);
+                    $aId = ($byDay[$a] ?? null) ? (int)$byDay[$a]['id'] : null;
+                    $bId = ($byDay[$b] ?? null) ? (int)$byDay[$b]['id'] : null;
+                    Plan::setDay($uid, $a, $bId);
+                    Plan::setDay($uid, $b, $aId);
+                    return [
+                        'ok'         => true,
+                        'a'          => $a,
+                        'b'          => $b,
+                        'undo_token' => ToolAudit::newToken(),
+                        '_undo'      => ['op' => 'plan_swap_days', 'a' => $a, 'b' => $b],
+                    ];
+                }
+
+                case 'apply_week_plan': {
+                    $plan = is_array($input['plan'] ?? null) ? $input['plan'] : [];
+                    $confirm = !empty($input['confirm']);
+                    $clean = [];
+                    $invalid = [];
+                    foreach ($plan as $day => $rid) {
+                        if (!in_array($day, PLAN_DAYS, true)) continue;
+                        if ($rid === null || $rid === '') {
+                            $clean[$day] = null;
+                            continue;
+                        }
+                        $rid = (int)$rid;
+                        if ($rid <= 0) { $invalid[] = $day; continue; }
+                        $r = Recipe::findById($uid, $rid);
+                        if (!$r) { $invalid[] = $day; continue; }
+                        $clean[$day] = ['id' => $rid, 'title' => (string)$r['title']];
+                    }
+                    if (!$clean) return ['ok' => false, 'error' => 'no_valid_assignments', 'invalid_days' => $invalid];
+                    if (!$confirm) {
+                        $previewMap = [];
+                        foreach ($clean as $d => $v) $previewMap[$d] = $v ? $v['title'] : '(clear)';
+                        return [
+                            'ok' => true, 'preview' => true,
+                            'plan' => $previewMap,
+                            'invalid_days' => $invalid,
+                            'note' => 'Preview only — confirm=true to apply. Days not in the plan stay as-is.',
+                        ];
+                    }
+                    $byDay = Plan::forUser($uid);
+                    $prev = [];
+                    foreach ($clean as $d => $v) {
+                        $prev[$d] = ($byDay[$d] ?? null) ? (int)$byDay[$d]['id'] : null;
+                        Plan::setDay($uid, $d, $v ? (int)$v['id'] : null);
+                    }
+                    return [
+                        'ok' => true,
+                        'committed' => true,
+                        'applied_count' => count($clean),
+                        'invalid_days'  => $invalid,
+                        'undo_token' => ToolAudit::newToken(),
+                        '_undo'      => ['op' => 'apply_week_plan', 'prev' => $prev],
+                    ];
+                }
+
+                // ---- Phase 2: Settings + navigation --------------------------
+                case 'set_user_settings': {
+                    $patch = is_array($input['patch'] ?? null) ? $input['patch'] : [];
+                    if (!$patch) return ['ok' => false, 'error' => 'empty_patch'];
+                    $prev = Settings::forUser($uid);
+                    $next = Settings::update($uid, $patch);
+                    $changed = [];
+                    foreach ($patch as $k => $_) {
+                        if (!array_key_exists($k, $next)) continue;
+                        if (($prev[$k] ?? null) !== ($next[$k] ?? null)) {
+                            $changed[$k] = ['from' => $prev[$k] ?? null, 'to' => $next[$k] ?? null];
+                        }
+                    }
+                    if (!$changed) {
+                        return ['ok' => true, 'changed' => [], 'note' => 'Already at those values.'];
+                    }
+                    return [
+                        'ok'         => true,
+                        'changed'    => $changed,
+                        'reload'     => true,  // client refreshes the page
+                        'undo_token' => ToolAudit::newToken(),
+                        '_undo'      => ['op' => 'set_user_settings', 'prev' => $prev],
+                    ];
+                }
+
+                case 'navigate': {
+                    $route = (string)($input['route'] ?? '');
+                    if (!in_array($route, AI_NAV_ROUTES, true)) {
+                        return ['ok' => false, 'error' => 'route_not_allowed'];
+                    }
+                    return ['ok' => true, 'navigate_to' => url_for($route)];
+                }
+
+                // ---- Phase 2: Undo -------------------------------------------
+                case 'undo': {
+                    $token = trim((string)($input['token'] ?? ''));
+                    if ($token === '') return ['ok' => false, 'error' => 'token_required'];
+                    $row = ToolAudit::findByUndoToken($uid, $token);
+                    if (!$row) return ['ok' => false, 'error' => 'token_not_found_or_already_used'];
+                    $payload = is_string($row['undo_payload']) ? json_decode($row['undo_payload'], true) : null;
+                    if (!is_array($payload) || empty($payload['op'])) {
+                        return ['ok' => false, 'error' => 'no_undo_payload'];
+                    }
+                    $reverseRes = $this->reverseAction($uid, $payload);
+                    if (!empty($reverseRes['ok'])) {
+                        ToolAudit::markReversed($uid, (int)$row['id']);
+                    }
+                    return $reverseRes;
+                }
             }
         } catch (Throwable $e) {
             return ['ok' => false, 'error' => $e->getMessage()];
@@ -826,6 +1315,343 @@ class AiController {
         if (!$raw) return [];
         $data = json_decode($raw, true);
         return is_array($data) ? $data : [];
+    }
+
+    /** Reverse a previously committed action using its stored undo_payload. */
+    private function reverseAction(int $uid, array $undo): array {
+        $op = (string)($undo['op'] ?? '');
+        try {
+            switch ($op) {
+                case 'toggle_favorite':
+                    $next = Recipe::toggleFavorite($uid, (int)$undo['id']);
+                    return $next === null
+                        ? ['ok' => false, 'error' => 'recipe_not_found']
+                        : ['ok' => true, 'reversed' => 'toggle_favorite', 'recipe_id' => (int)$undo['id'], 'is_favorite' => (bool)$next];
+
+                case 'pantry_set_in_stock': {
+                    $row = Pantry::update($uid, (int)$undo['id'], ['in_stock' => (bool)$undo['prev_in_stock']]);
+                    return $row
+                        ? ['ok' => true, 'reversed' => 'pantry_set_in_stock', 'id' => (int)$undo['id'], 'in_stock' => (bool)$undo['prev_in_stock']]
+                        : ['ok' => false, 'error' => 'pantry_item_not_found'];
+                }
+
+                case 'pantry_restock': {
+                    $pdo = db();
+                    $stmt = $pdo->prepare(
+                        'UPDATE pantry_items
+                            SET in_stock = ?, purchase_count = ?, last_bought = ?
+                          WHERE id = ? AND user_id = ?'
+                    );
+                    $stmt->execute([
+                        (bool)$undo['prev_in_stock'] ? 1 : 0,
+                        (int)$undo['prev_count'],
+                        $undo['prev_last_bought'] ?: null,
+                        (int)$undo['id'],
+                        $uid,
+                    ]);
+                    return $stmt->rowCount() > 0
+                        ? ['ok' => true, 'reversed' => 'pantry_restock', 'id' => (int)$undo['id']]
+                        : ['ok' => false, 'error' => 'pantry_item_not_found'];
+                }
+
+                case 'pantry_update': {
+                    $row = Pantry::update($uid, (int)$undo['id'], $undo['prev'] ?? []);
+                    return $row
+                        ? ['ok' => true, 'reversed' => 'pantry_update', 'id' => (int)$undo['id']]
+                        : ['ok' => false, 'error' => 'pantry_item_not_found'];
+                }
+
+                case 'shopping_check': {
+                    $row = Shopping::update($uid, (int)$undo['id'], ['checked' => (bool)$undo['prev']]);
+                    return $row
+                        ? ['ok' => true, 'reversed' => 'shopping_check', 'id' => (int)$undo['id'], 'checked' => (bool)$undo['prev']]
+                        : ['ok' => false, 'error' => 'shopping_item_not_found'];
+                }
+
+                case 'shopping_remove': {
+                    $snap = $undo['snapshot'] ?? null;
+                    if (!is_array($snap)) return ['ok' => false, 'error' => 'no_snapshot'];
+                    $row = Shopping::add($uid, [
+                        'name'             => (string)($snap['name'] ?? ''),
+                        'qty'              => $snap['qty']  ?? null,
+                        'unit'             => (string)($snap['unit'] ?? ''),
+                        'source_recipe_id' => $snap['source_recipe_id'] ?? null,
+                        'source_label'     => (string)($snap['source_label'] ?? 'manual'),
+                        'aisle'            => (string)($snap['aisle'] ?? 'Other'),
+                    ]);
+                    return ['ok' => true, 'reversed' => 'shopping_remove', 'restored_id' => (int)$row['id']];
+                }
+
+                case 'plan_clear_day': {
+                    $rid = $undo['prev_recipe_id'] === null ? null : (int)$undo['prev_recipe_id'];
+                    Plan::setDay($uid, (string)$undo['day'], $rid);
+                    return ['ok' => true, 'reversed' => 'plan_clear_day', 'day' => $undo['day'], 'recipe_id' => $rid];
+                }
+
+                case 'plan_clear_week': {
+                    $prev = is_array($undo['prev'] ?? null) ? $undo['prev'] : [];
+                    foreach ($prev as $d => $rid) {
+                        if (!in_array($d, PLAN_DAYS, true)) continue;
+                        try { Plan::setDay($uid, $d, $rid === null ? null : (int)$rid); } catch (Throwable $_) {}
+                    }
+                    return ['ok' => true, 'reversed' => 'plan_clear_week', 'restored_days' => count($prev)];
+                }
+
+                case 'plan_swap_days': {
+                    // Symmetric: swapping back is just another swap.
+                    $a = (string)$undo['a']; $b = (string)$undo['b'];
+                    $byDay = Plan::forUser($uid);
+                    $aId = ($byDay[$a] ?? null) ? (int)$byDay[$a]['id'] : null;
+                    $bId = ($byDay[$b] ?? null) ? (int)$byDay[$b]['id'] : null;
+                    Plan::setDay($uid, $a, $bId);
+                    Plan::setDay($uid, $b, $aId);
+                    return ['ok' => true, 'reversed' => 'plan_swap_days', 'a' => $a, 'b' => $b];
+                }
+
+                case 'apply_week_plan': {
+                    $prev = is_array($undo['prev'] ?? null) ? $undo['prev'] : [];
+                    foreach ($prev as $d => $rid) {
+                        if (!in_array($d, PLAN_DAYS, true)) continue;
+                        try { Plan::setDay($uid, $d, $rid === null ? null : (int)$rid); } catch (Throwable $_) {}
+                    }
+                    return ['ok' => true, 'reversed' => 'apply_week_plan', 'restored_days' => count($prev)];
+                }
+
+                case 'set_user_settings': {
+                    $prev = is_array($undo['prev'] ?? null) ? $undo['prev'] : [];
+                    if (!$prev) return ['ok' => false, 'error' => 'no_prev_settings'];
+                    Settings::update($uid, $prev);
+                    return ['ok' => true, 'reversed' => 'set_user_settings', 'reload' => true];
+                }
+            }
+            return ['ok' => false, 'error' => 'unknown_undo_op', 'op' => $op];
+        } catch (Throwable $e) {
+            return ['ok' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    private static function execUpdateRecipe(int $uid, array $input): array {
+        $rid     = (int)($input['id'] ?? 0);
+        $patch   = is_array($input['patch'] ?? null) ? $input['patch'] : [];
+        $confirm = !empty($input['confirm']);
+        $existing = Recipe::findFull($uid, $rid);
+        if (!$existing) return ['ok' => false, 'error' => 'recipe_not_found'];
+
+        $allowed = ['title','summary','cuisine','time_minutes','servings','difficulty','glyph','color','tags','notes'];
+        $clean = [];
+        foreach ($allowed as $k) {
+            if (array_key_exists($k, $patch)) $clean[$k] = $patch[$k];
+        }
+        if (!$clean) return ['ok' => false, 'error' => 'empty_patch'];
+
+        $diff = [];
+        foreach ($clean as $k => $v) {
+            $before = $existing[$k] ?? null;
+            if ($k === 'tags') {
+                $existingTags = is_array($existing['tags'] ?? null) ? $existing['tags'] : [];
+                if (json_encode($existingTags) !== json_encode($v)) {
+                    $diff[$k] = ['from' => $existingTags, 'to' => $v];
+                }
+            } elseif ((string)$before !== (string)$v) {
+                $diff[$k] = ['from' => $before, 'to' => $v];
+            }
+        }
+        if (!$diff) return ['ok' => true, 'note' => 'No changes — recipe already matches.'];
+
+        if (!$confirm) {
+            return [
+                'ok'      => true,
+                'preview' => true,
+                'recipe_id' => $rid,
+                'title'   => (string)$existing['title'],
+                'diff'    => $diff,
+                'note'    => 'Preview only — confirm=true to apply.',
+            ];
+        }
+        $merged = array_merge($existing, $clean);
+        try {
+            $ok = Recipe::updateFull($uid, $rid, $merged);
+        } catch (Throwable $e) {
+            return ['ok' => false, 'error' => 'update_failed', 'message' => $e->getMessage()];
+        }
+        if (!$ok) return ['ok' => false, 'error' => 'recipe_not_found'];
+        return [
+            'ok'         => true,
+            'committed'  => true,
+            'recipe_id'  => $rid,
+            'changed'    => array_keys($diff),
+        ];
+    }
+
+    private static function execUpdateRecipeIngredients(int $uid, array $input): array {
+        $rid     = (int)($input['id'] ?? 0);
+        $list    = is_array($input['ingredients'] ?? null) ? $input['ingredients'] : [];
+        $confirm = !empty($input['confirm']);
+        $existing = Recipe::findFull($uid, $rid);
+        if (!$existing) return ['ok' => false, 'error' => 'recipe_not_found'];
+        if (!$list) return ['ok' => false, 'error' => 'no_ingredients'];
+
+        if (!$confirm) {
+            $oldNames = array_map(fn($i) => (string)$i['name'], $existing['ingredients']);
+            $newNames = array_map(fn($i) => (string)($i['name'] ?? ''), $list);
+            return [
+                'ok' => true, 'preview' => true,
+                'recipe_id' => $rid, 'title' => (string)$existing['title'],
+                'old_count' => count($oldNames), 'new_count' => count($newNames),
+                'old_names' => $oldNames, 'new_names' => $newNames,
+                'note' => 'Preview only — confirm=true replaces the entire ingredient list.',
+            ];
+        }
+        $merged = array_merge($existing, ['ingredients' => $list]);
+        try {
+            $ok = Recipe::updateFull($uid, $rid, $merged);
+        } catch (Throwable $e) {
+            return ['ok' => false, 'error' => 'update_failed', 'message' => $e->getMessage()];
+        }
+        return $ok
+            ? ['ok' => true, 'committed' => true, 'recipe_id' => $rid, 'count' => count($list)]
+            : ['ok' => false, 'error' => 'recipe_not_found'];
+    }
+
+    private static function execUpdateRecipeSteps(int $uid, array $input): array {
+        $rid     = (int)($input['id'] ?? 0);
+        $list    = is_array($input['steps'] ?? null) ? $input['steps'] : [];
+        $confirm = !empty($input['confirm']);
+        $existing = Recipe::findFull($uid, $rid);
+        if (!$existing) return ['ok' => false, 'error' => 'recipe_not_found'];
+        if (!$list) return ['ok' => false, 'error' => 'no_steps'];
+
+        if (!$confirm) {
+            return [
+                'ok' => true, 'preview' => true,
+                'recipe_id' => $rid, 'title' => (string)$existing['title'],
+                'old_count' => count($existing['steps']),
+                'new_count' => count($list),
+                'new_steps' => array_map(fn($s) => mb_substr((string)$s, 0, 200), array_slice($list, 0, 12)),
+                'note' => 'Preview only — confirm=true replaces all steps in order.',
+            ];
+        }
+        $merged = array_merge($existing, ['steps' => $list]);
+        try {
+            $ok = Recipe::updateFull($uid, $rid, $merged);
+        } catch (Throwable $e) {
+            return ['ok' => false, 'error' => 'update_failed', 'message' => $e->getMessage()];
+        }
+        return $ok
+            ? ['ok' => true, 'committed' => true, 'recipe_id' => $rid, 'count' => count($list)]
+            : ['ok' => false, 'error' => 'recipe_not_found'];
+    }
+
+    private static function execScaleRecipe(int $uid, array $input): array {
+        $rid     = (int)($input['id'] ?? 0);
+        $target  = (int)($input['target_servings'] ?? 0);
+        $save    = !empty($input['save']);
+        $confirm = !empty($input['confirm']);
+        $existing = Recipe::findFull($uid, $rid);
+        if (!$existing) return ['ok' => false, 'error' => 'recipe_not_found'];
+        if ($target < 1 || $target > 100) return ['ok' => false, 'error' => 'bad_target_servings'];
+
+        $base  = max(1, (int)$existing['servings']);
+        $scale = $target / $base;
+
+        $scaled = [];
+        foreach ($existing['ingredients'] as $ing) {
+            $qty = $ing['qty'];
+            $newQty = $qty;
+            if ($qty !== null && $qty !== '') {
+                $v = (float)$qty * $scale;
+                $newQty = rtrim(rtrim(number_format($v, 3, '.', ''), '0'), '.');
+                if ($newQty === '' || $newQty === '-') $newQty = null;
+            }
+            $scaled[] = [
+                'qty'  => $newQty,
+                'unit' => (string)($ing['unit'] ?? ''),
+                'name' => (string)($ing['name'] ?? ''),
+                'aisle'=> (string)($ing['aisle'] ?? 'Other'),
+            ];
+        }
+
+        if (!$confirm || !$save) {
+            return [
+                'ok' => true,
+                'preview' => true,
+                'recipe_id' => $rid,
+                'title' => (string)$existing['title'],
+                'from_servings' => $base,
+                'to_servings'   => $target,
+                'scaled_ingredients' => $scaled,
+                'note' => $save
+                    ? 'Preview only — call again with confirm=true and save=true to persist.'
+                    : 'Scaled list ready to show the user. No write happened. Set save=true (and confirm=true) to also persist the new servings + ingredients to the recipe.',
+            ];
+        }
+
+        $merged = array_merge($existing, [
+            'servings'    => $target,
+            'ingredients' => $scaled,
+        ]);
+        try {
+            Recipe::updateFull($uid, $rid, $merged);
+        } catch (Throwable $e) {
+            return ['ok' => false, 'error' => 'update_failed', 'message' => $e->getMessage()];
+        }
+        return [
+            'ok' => true, 'committed' => true,
+            'recipe_id' => $rid,
+            'from_servings' => $base,
+            'to_servings'   => $target,
+        ];
+    }
+
+    private static function execSubstituteIngredient(int $uid, array $input): array {
+        $rid     = (int)($input['id'] ?? 0);
+        $from    = mb_strtolower(trim((string)($input['from'] ?? '')));
+        $to      = trim((string)($input['to'] ?? ''));
+        $reason  = trim((string)($input['reason'] ?? ''));
+        $confirm = !empty($input['confirm']);
+        if ($from === '') return ['ok' => false, 'error' => 'from_required'];
+        $existing = Recipe::findFull($uid, $rid);
+        if (!$existing) return ['ok' => false, 'error' => 'recipe_not_found'];
+
+        $next = [];
+        $matched = 0;
+        $removed = 0;
+        foreach ($existing['ingredients'] as $ing) {
+            $name = (string)$ing['name'];
+            if (mb_stripos($name, $from) !== false) {
+                $matched++;
+                if ($to === '') { $removed++; continue; }
+                $ing['name'] = $to;
+            }
+            $next[] = $ing;
+        }
+        if ($matched === 0) {
+            return ['ok' => false, 'error' => 'ingredient_not_found', 'note' => 'No ingredient name contained "' . $from . '".'];
+        }
+
+        if (!$confirm) {
+            return [
+                'ok' => true, 'preview' => true,
+                'recipe_id' => $rid, 'title' => (string)$existing['title'],
+                'matched_count' => $matched,
+                'removed_count' => $removed,
+                'from' => $from, 'to' => $to,
+                'reason' => $reason,
+                'note' => 'Preview only — confirm=true to apply. Verify the swap respects allergies/diet.',
+            ];
+        }
+        $merged = array_merge($existing, ['ingredients' => $next]);
+        try {
+            Recipe::updateFull($uid, $rid, $merged);
+        } catch (Throwable $e) {
+            return ['ok' => false, 'error' => 'update_failed', 'message' => $e->getMessage()];
+        }
+        return [
+            'ok' => true, 'committed' => true,
+            'recipe_id' => $rid,
+            'matched_count' => $matched,
+            'removed_count' => $removed,
+        ];
     }
 
     /** Trim a Recipe::findFull row down to the fields useful in tool responses. */

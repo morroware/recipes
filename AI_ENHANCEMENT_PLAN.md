@@ -194,58 +194,81 @@ Give the model a tool for every meaningful action on every page.
 
 ### 2.1 Recipes
 
-- [ ] `open_recipe(id)` → returns `{navigate_to: '/recipes/:id'}`; client
-  auto-navigates after the assistant reply settles.
-- [ ] `update_recipe(id, patch)` (preview/commit) — title, summary,
+- [x] `open_recipe(id)` → returns `{navigate_to: '/recipes/:id'}`; client
+  auto-navigates ~900ms after the assistant reply settles.
+- [x] `update_recipe(id, patch)` (preview/commit) — title, summary,
   cuisine, time, servings, difficulty, glyph, color, tags, notes.
-- [ ] `update_recipe_ingredients(id, ingredients[])` (preview/commit)
-- [ ] `update_recipe_steps(id, steps[])` (preview/commit)
-- [ ] `scale_recipe(id, target_servings)` — server computes scaled
-  ingredients; preview shows old → new; commit updates or returns a
-  scaled copy without saving (user choice).
-- [ ] `substitute_ingredient(id, from, to, reason)` — applies a swap
-  with allergy-aware validation.
-- [ ] `toggle_favorite(id)`
-- [ ] `delete_recipe(id)` (preview/commit, requires explicit confirm
-  string in the user message)
+- [x] `update_recipe_ingredients(id, ingredients[])` (preview/commit)
+- [x] `update_recipe_steps(id, steps[])` (preview/commit)
+- [x] `scale_recipe(id, target_servings)` — server computes scaled
+  ingredients; preview shows old → new; `confirm=true save=true` persists
+  (default behaviour is non-destructive preview).
+- [x] `substitute_ingredient(id, from, to, reason)` — applies a swap;
+  allergy-aware enforcement is delegated to the model via the system prompt.
+- [x] `toggle_favorite(id)` — instant + reversible via `undo_token`.
+- [x] `delete_recipe(id)` (preview/commit; system prompt instructs the
+  assistant to require the user to repeat the title before commit).
 
 ### 2.2 Pantry
 
-- [ ] `pantry_search(query)`
-- [ ] `pantry_set_in_stock(id, in_stock: bool)`
-- [ ] `pantry_restock(id)`
-- [ ] `pantry_remove(id)` (preview/commit)
-- [ ] `pantry_update(id, patch)` — qty, unit, category
+- [x] `pantry_search(query)` — partial-name + optional in_stock filter.
+- [x] `pantry_set_in_stock(id, in_stock: bool)` — instant + reversible.
+- [x] `pantry_restock(id)` — instant + reversible (snapshots
+  `purchase_count` + `last_bought` for accurate undo).
+- [x] `pantry_remove(id)` (preview/commit).
+- [x] `pantry_update(id, patch)` — qty/unit/category, instant + reversible.
 
 ### 2.3 Shopping
 
-- [ ] `shopping_check(id, checked: bool)`
-- [ ] `shopping_clear_checked()`
-- [ ] `shopping_organize_by_aisle()` — model-driven categorisation
-- [ ] `shopping_build_from_plan()` — wraps existing
-  `PlanController::apiBuildShopping`
-- [ ] `shopping_remove(id)`
+- [x] `shopping_check(id, checked: bool)` — instant + reversible.
+- [x] `shopping_clear_checked()` (preview/commit).
+- [x] `shopping_organize_by_aisle()` — model supplies full {id,aisle}
+  assignments; server reorders and persists.
+- [x] `shopping_build_from_plan()` — wraps `Plan::buildShoppingList`.
+- [x] `shopping_remove(id)` — instant + reversible (full row snapshot
+  for re-insertion on undo).
 
 ### 2.4 Plan
 
-- [ ] `plan_clear_day(day)`
-- [ ] `plan_clear_week()`
-- [ ] `plan_swap_days(a, b)`
-- [ ] `apply_week_plan({Mon: recipe_id|recipe_idea, …})` (preview/commit) —
-  one call to fill a whole week (extends `apiPlanWeek`).
+- [x] `plan_clear_day(day)` — instant + reversible (snapshots prev id).
+- [x] `plan_clear_week()` (preview/commit + reversible — full week snapshot).
+- [x] `plan_swap_days(a, b)` — instant + reversible (symmetric swap).
+- [x] `apply_week_plan({Mon: recipe_id|null, …})` (preview/commit) —
+  values must be ids of existing recipes (model uses `recipe_search` to
+  find them first). `recipe_idea` strings are intentionally NOT supported
+  in this pass — the model can save_recipe_to_book first if needed.
 
 ### 2.5 Settings & navigation
 
-- [ ] `set_user_settings(patch)` — theme, mode, density, font_pair,
-  radius, units, etc. (validated against the enum set).
-- [ ] `navigate(route)` — whitelisted routes only.
+- [x] `set_user_settings(patch)` — theme/mode/density/font_pair/radius/
+  card_style/sticker_rotate/dot_grid/units; reversible; client refreshes
+  the page after a successful change.
+- [x] `navigate(route)` — whitelisted via `AI_NAV_ROUTES` constant
+  (`/`, `/favorites`, `/pantry`, `/shopping`, `/plan`, `/chat`, `/add`).
 
 ### 2.6 Audit + undo
 
-- [ ] **Every commit returns an `undo_token`** stored in `ai_tool_audit`.
-- [ ] **New `undo(token)` tool** — reverses the last action when feasible
-  (favorite toggle, pantry stock, shopping check, plan day, etc.).
-- [ ] **Toast UI** in chat shows a 10-second "Undo" button.
+- [x] **Every tool call** lands in `ai_tool_audit` (id, user, conversation,
+  tool, input/result JSON, optional undo_token + undo_payload, ok flag,
+  reversed_at, created_at). Migration `002_ai_tool_audit.sql` is additive
+  (`CREATE TABLE IF NOT EXISTS`) and cPanel-safe.
+- [x] **New `undo(token)` tool** — reverses the last reversible action
+  (favorite toggle, pantry stock, shopping check, shopping remove, plan
+  day, plan swap, plan week clear, apply_week_plan, settings, pantry
+  update). Marks the audit row reversed so the same token can't be
+  replayed.
+- [x] **Inline 10-second Undo button** in the chat surface. Hits
+  `POST /api/ai/undo` directly so the user doesn't burn a model turn just
+  to reverse one click. Auto-disappears after 10s.
+
+**Acceptance:** "Switch me to dark mode and metric, then build a shopping
+list from this week's plan, then check off the eggs" — all via chat, with
+live UI updates and an undo path.
+
+**Phase 2 status (claude/sprout-ai-aware-cpanel-uztqc):** all six sections
+landed. 25 new tools registered (34 total). Migration 002 must be applied
+on existing installs; fresh installs pick it up via the updated
+`schema.sql`.
 
 **Acceptance:** "Switch me to dark mode and metric, then build a shopping
 list from this week's plan, then check off the eggs" — all via chat, with

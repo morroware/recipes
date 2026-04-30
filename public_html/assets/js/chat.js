@@ -212,15 +212,69 @@ async function init() {
       } else {
         li.textContent = describeAction(a);
       }
+      // Inline 10-second Undo button for any reversible commit.
+      if (ok && a?.result?.undo_token) {
+        const undoBtn = document.createElement('button');
+        undoBtn.type = 'button';
+        undoBtn.className = 'btn btn-sm chat-undo-btn';
+        undoBtn.textContent = '↶ Undo';
+        undoBtn.style.marginLeft = '8px';
+        const token = String(a.result.undo_token);
+        let countdown = 10;
+        const tick = () => {
+          if (countdown <= 0) { undoBtn.remove(); return; }
+          undoBtn.textContent = `↶ Undo (${countdown}s)`;
+          countdown--;
+          undoBtn._timer = setTimeout(tick, 1000);
+        };
+        tick();
+        undoBtn.addEventListener('click', async () => {
+          clearTimeout(undoBtn._timer);
+          undoBtn.disabled = true;
+          undoBtn.textContent = '…';
+          try {
+            await apiFetch('/api/ai/undo', {
+              method: 'POST',
+              body: JSON.stringify({ token }),
+            });
+            undoBtn.textContent = '✓ Undone';
+            toast('Undone');
+          } catch {
+            undoBtn.textContent = '↶ Failed';
+            undoBtn.disabled = false;
+          }
+        });
+        li.appendChild(undoBtn);
+      }
       ul.appendChild(li);
     }
     els.log.appendChild(ul);
     els.log.scrollTop = els.log.scrollHeight;
   }
 
+  // After the bubble renders, follow any navigate_to / reload hints.
+  function applySideEffects(actions) {
+    if (!actions || !actions.length) return;
+    let navTarget = null;
+    let needsReload = false;
+    for (const a of actions) {
+      const r = a?.result;
+      if (!r || r.ok === false) continue;
+      if (r.navigate_to && !navTarget) navTarget = r.navigate_to;
+      if (r.reload) needsReload = true;
+    }
+    if (navTarget) {
+      // Small delay so the user can read the assistant's reply first.
+      setTimeout(() => { window.location.href = navTarget; }, 900);
+    } else if (needsReload) {
+      setTimeout(() => { window.location.reload(); }, 900);
+    }
+  }
+
   function describeAction(a) {
     const i = a?.input || {};
     const r = a?.result || {};
+    const titleish = (id) => `#${id}`;
     switch (a.tool) {
       case 'remember_preference':   return `🧠 Remembered: ${i.fact} [${i.category || 'other'}]`;
       case 'forget_preference':     return `🗑️ Forgot memory #${i.id}`;
@@ -244,6 +298,34 @@ async function init() {
         return `📚 Saved "${t}" to your book${link}`;
       }
       case 'log_cooked_recipe':     return `🍽️ Logged cook: ${i.recipe_title}` + (i.rating ? ` (${'★'.repeat(i.rating)})` : '');
+      // ---- Phase 2 -------------------------------------------------------
+      case 'recipe_search':         return `🔎 Searched recipes: "${i.query || '(all)'}" — ${r.count ?? 0} hit${(r.count ?? 0) === 1 ? '' : 's'}`;
+      case 'recipe_get':            return `📖 Loaded recipe ${titleish(i.id)}${r.recipe?.title ? ': ' + r.recipe.title : ''}`;
+      case 'open_recipe':           return `↗ Opening "${r.title || titleish(i.id)}"…`;
+      case 'update_recipe':         return r.preview ? `👀 Previewed edits to ${titleish(i.id)} (${Object.keys(r.diff || {}).join(', ')})` : `✏️ Updated ${titleish(i.id)}: ${(r.changed || []).join(', ')}`;
+      case 'update_recipe_ingredients': return r.preview ? `👀 Previewed new ingredient list (${r.new_count})` : `🥕 Replaced ingredients (${r.count})`;
+      case 'update_recipe_steps':   return r.preview ? `👀 Previewed new steps (${r.new_count})` : `📝 Replaced steps (${r.count})`;
+      case 'scale_recipe':          return r.committed ? `📏 Scaled "${r.title || titleish(i.id)}" → ${r.to_servings} servings` : `📏 Scaled preview: ${r.from_servings} → ${r.to_servings} servings`;
+      case 'substitute_ingredient': return r.preview ? `👀 Sub preview: ${i.from} → ${i.to || '(remove)'} on ${titleish(i.id)}` : `🔄 Subbed ${i.from} → ${i.to || '(removed)'} on ${titleish(i.id)}`;
+      case 'toggle_favorite':       return r.is_favorite ? `♥ Favorited ${titleish(i.id)}` : `♡ Unfavorited ${titleish(i.id)}`;
+      case 'delete_recipe':         return r.preview ? `👀 Previewed deletion of "${r.title}"` : `🗑️ Deleted "${r.title || titleish(i.id)}"`;
+      case 'pantry_search':         return `🔎 Searched pantry: "${i.query}" — ${r.count ?? 0} hit${(r.count ?? 0) === 1 ? '' : 's'}`;
+      case 'pantry_set_in_stock':   return `${i.in_stock ? '✓' : '✗'} ${r.item?.name || titleish(i.id)} is now ${i.in_stock ? 'in stock' : 'out of stock'}`;
+      case 'pantry_restock':        return `🥕 Restocked ${r.item?.name || titleish(i.id)}`;
+      case 'pantry_remove':         return r.preview ? `👀 Preview: remove ${r.item?.name || titleish(i.id)} from pantry` : `🗑️ Removed ${r.name || titleish(i.id)} from pantry`;
+      case 'pantry_update':         return `✏️ Updated pantry item: ${r.item?.name || titleish(i.id)}`;
+      case 'shopping_check':        return `${i.checked ? '☑' : '☐'} ${r.item?.name || titleish(i.id)}`;
+      case 'shopping_clear_checked':return r.preview ? `👀 Preview: clear ${r.count} checked` : `🧹 Cleared ${r.removed} checked item${r.removed === 1 ? '' : 's'}`;
+      case 'shopping_organize_by_aisle': return r.preview ? `👀 Aisle preview (${r.count} items)` : `📂 Organised ${r.count} items by aisle`;
+      case 'shopping_build_from_plan': return `🛒 Built shopping list from plan: +${r.added} ingredient${r.added === 1 ? '' : 's'} from ${r.recipes} recipe${r.recipes === 1 ? '' : 's'}`;
+      case 'shopping_remove':       return `🗑️ Removed ${r.name || titleish(i.id)} from shopping`;
+      case 'plan_clear_day':        return `🧹 Cleared ${i.day}`;
+      case 'plan_clear_week':       return r.preview ? `👀 Preview: clear ${r.count} day${r.count === 1 ? '' : 's'}` : `🧹 Cleared the week (${r.cleared} day${r.cleared === 1 ? '' : 's'})`;
+      case 'plan_swap_days':        return `🔁 Swapped ${i.a} ↔ ${i.b}`;
+      case 'apply_week_plan':       return r.preview ? `👀 Plan preview (${Object.keys(r.plan || {}).length} day${Object.keys(r.plan || {}).length === 1 ? '' : 's'})` : `📅 Applied plan to ${r.applied_count} day${r.applied_count === 1 ? '' : 's'}`;
+      case 'set_user_settings':     return `⚙️ Updated settings: ${Object.keys(r.changed || {}).join(', ') || '(none)'}`;
+      case 'navigate':              return `↗ Navigating…`;
+      case 'undo':                  return r.ok ? `↶ Undone: ${r.reversed}` : `↶ Undo failed: ${r.error}`;
       default: return `↺ ${a.tool}`;
     }
   }
@@ -270,6 +352,7 @@ async function init() {
         if (data.actions.some(a => a.tool === 'remember_preference' || a.tool === 'forget_preference')) {
           refreshMemories();
         }
+        applySideEffects(data.actions);
       }
       if (!state.conversationId && data.conversation_id) {
         state.conversationId = data.conversation_id;

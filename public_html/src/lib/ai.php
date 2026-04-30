@@ -696,8 +696,379 @@ function ai_chat_tools(): array {
                 'required' => ['recipe_title'],
             ],
         ],
+
+        // ---- Phase 2: Recipes -------------------------------------------------
+        [
+            'name'        => 'open_recipe',
+            'description' => 'Navigate the user to a recipe page. Returns a navigate_to URL that the client auto-follows after the assistant reply settles.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id' => ['type' => 'integer', 'description' => 'recipes.id'],
+                ],
+                'required' => ['id'],
+            ],
+        ],
+        [
+            'name'        => 'update_recipe',
+            'description' => 'Edit recipe metadata (title, summary, cuisine, tags, time, servings, difficulty, glyph, color, notes). Preview-then-commit: first call with confirm=false returns the diff; only after the user says yes, call again with confirm=true.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id'    => ['type' => 'integer'],
+                    'patch' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'title'        => ['type' => 'string'],
+                            'summary'      => ['type' => 'string'],
+                            'cuisine'      => ['type' => 'string'],
+                            'time_minutes' => ['type' => 'integer', 'minimum' => 0],
+                            'servings'     => ['type' => 'integer', 'minimum' => 1],
+                            'difficulty'   => ['type' => 'string', 'enum' => ['Easy','Medium','Hard']],
+                            'glyph'        => ['type' => 'string'],
+                            'color'        => ['type' => 'string', 'enum' => ['mint','butter','peach','lilac','sky','blush','lime','coral']],
+                            'tags'         => ['type' => 'array', 'items' => ['type' => 'string']],
+                            'notes'        => ['type' => 'string'],
+                        ],
+                    ],
+                    'confirm' => ['type' => 'boolean'],
+                ],
+                'required' => ['id', 'patch'],
+            ],
+        ],
+        [
+            'name'        => 'update_recipe_ingredients',
+            'description' => 'Replace a recipe\'s entire ingredient list. Preview-then-commit. Pass the full new list — partial edits should be done by reading the current list (recipe_get) and submitting the merged result.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id'          => ['type' => 'integer'],
+                    'ingredients' => [
+                        'type'     => 'array',
+                        'minItems' => 1,
+                        'items'    => [
+                            'type'       => 'object',
+                            'properties' => [
+                                'qty'   => ['type' => ['string','null']],
+                                'unit'  => ['type' => 'string'],
+                                'name'  => ['type' => 'string'],
+                                'aisle' => ['type' => 'string', 'enum' => AISLES],
+                            ],
+                            'required' => ['name'],
+                        ],
+                    ],
+                    'confirm' => ['type' => 'boolean'],
+                ],
+                'required' => ['id', 'ingredients'],
+            ],
+        ],
+        [
+            'name'        => 'update_recipe_steps',
+            'description' => 'Replace a recipe\'s entire step list. Preview-then-commit. Pass the full new list in order.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id'      => ['type' => 'integer'],
+                    'steps'   => ['type' => 'array', 'minItems' => 1, 'items' => ['type' => 'string']],
+                    'confirm' => ['type' => 'boolean'],
+                ],
+                'required' => ['id', 'steps'],
+            ],
+        ],
+        [
+            'name'        => 'scale_recipe',
+            'description' => 'Compute a scaled ingredient list for target_servings. Preview-only by default — returns old → new amounts. With confirm=true AND save=true, the recipe is updated in place; with confirm=true AND save=false (default), no write happens and the model can present the scaled list to the user.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id'              => ['type' => 'integer'],
+                    'target_servings' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 100],
+                    'save'            => ['type' => 'boolean', 'description' => 'If true and confirm=true, persist the scaled values to the recipe. Default false (preview-only).'],
+                    'confirm'         => ['type' => 'boolean'],
+                ],
+                'required' => ['id', 'target_servings'],
+            ],
+        ],
+        [
+            'name'        => 'substitute_ingredient',
+            'description' => 'Swap one ingredient for another inside a recipe (string match against current ingredient names). Preview-then-commit. Honour the user\'s allergies/diet — refuse swaps that violate them.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id'      => ['type' => 'integer'],
+                    'from'    => ['type' => 'string', 'description' => 'Current ingredient name to replace (case-insensitive substring match).'],
+                    'to'      => ['type' => 'string', 'description' => 'Replacement ingredient name. Empty string = remove the ingredient.'],
+                    'reason'  => ['type' => 'string', 'description' => 'One-line why (allergy, preference, availability, etc.).'],
+                    'confirm' => ['type' => 'boolean'],
+                ],
+                'required' => ['id', 'from', 'to'],
+            ],
+        ],
+        [
+            'name'        => 'toggle_favorite',
+            'description' => 'Flip the ♥ favorite flag on a recipe. Reversible via undo_token. Commits immediately (no preview needed — the action itself is its own preview).',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id' => ['type' => 'integer'],
+                ],
+                'required' => ['id'],
+            ],
+        ],
+        [
+            'name'        => 'delete_recipe',
+            'description' => 'Permanently delete a recipe. Preview-then-commit, AND the user must include the literal recipe title in their most recent message before you commit. Refuse if you are not sure they want it gone.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id'      => ['type' => 'integer'],
+                    'confirm' => ['type' => 'boolean'],
+                ],
+                'required' => ['id'],
+            ],
+        ],
+
+        // ---- Phase 2: Pantry --------------------------------------------------
+        [
+            'name'        => 'pantry_search',
+            'description' => 'Search the user\'s pantry by partial ingredient name. Returns matching items with stock state.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'query'    => ['type' => 'string'],
+                    'in_stock' => ['type' => 'boolean', 'description' => 'Optional: filter to only in-stock (true) or only out-of-stock (false).'],
+                ],
+                'required' => ['query'],
+            ],
+        ],
+        [
+            'name'        => 'pantry_set_in_stock',
+            'description' => 'Mark a pantry item as in or out of stock. Reversible via undo_token. Commits immediately.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id'       => ['type' => 'integer'],
+                    'in_stock' => ['type' => 'boolean'],
+                ],
+                'required' => ['id', 'in_stock'],
+            ],
+        ],
+        [
+            'name'        => 'pantry_restock',
+            'description' => 'Mark a pantry item as just-purchased (sets in_stock=1, last_bought=now, increments purchase_count). Reversible.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id' => ['type' => 'integer'],
+                ],
+                'required' => ['id'],
+            ],
+        ],
+        [
+            'name'        => 'pantry_remove',
+            'description' => 'Delete a pantry item entirely (not the same as out-of-stock). Preview-then-commit because this destroys purchase history.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id'      => ['type' => 'integer'],
+                    'confirm' => ['type' => 'boolean'],
+                ],
+                'required' => ['id'],
+            ],
+        ],
+        [
+            'name'        => 'pantry_update',
+            'description' => 'Patch a pantry item\'s qty / unit / category. Reversible via undo_token. Commits immediately.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id'       => ['type' => 'integer'],
+                    'qty'      => ['type' => ['string','null']],
+                    'unit'     => ['type' => 'string'],
+                    'category' => ['type' => 'string', 'enum' => $allowedCats],
+                ],
+                'required' => ['id'],
+            ],
+        ],
+
+        // ---- Phase 2: Shopping ------------------------------------------------
+        [
+            'name'        => 'shopping_check',
+            'description' => 'Check or uncheck an item on the shopping list. Reversible.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id'      => ['type' => 'integer'],
+                    'checked' => ['type' => 'boolean'],
+                ],
+                'required' => ['id', 'checked'],
+            ],
+        ],
+        [
+            'name'        => 'shopping_clear_checked',
+            'description' => 'Remove every checked item from the shopping list. Preview-then-commit (destructive bulk).',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'confirm' => ['type' => 'boolean'],
+                ],
+            ],
+        ],
+        [
+            'name'        => 'shopping_organize_by_aisle',
+            'description' => 'Reassign every shopping item to an aisle bucket and reorder the list so same-aisle items group together. Preview-then-commit.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'assignments' => [
+                        'type' => 'array',
+                        'description' => 'Full list of {id, aisle} pairs covering every item currently on the list.',
+                        'items' => [
+                            'type' => 'object',
+                            'properties' => [
+                                'id'    => ['type' => 'integer'],
+                                'aisle' => ['type' => 'string', 'enum' => AISLES],
+                            ],
+                            'required' => ['id', 'aisle'],
+                        ],
+                    ],
+                    'confirm' => ['type' => 'boolean'],
+                ],
+                'required' => ['assignments'],
+            ],
+        ],
+        [
+            'name'        => 'shopping_build_from_plan',
+            'description' => 'Append every assigned day\'s recipe ingredients to the shopping list (dedupes against existing per-recipe entries). Same as the "🛒 Build shopping list" button.',
+            'input_schema' => ['type' => 'object', 'properties' => new stdClass()],
+        ],
+        [
+            'name'        => 'shopping_remove',
+            'description' => 'Remove one item from the shopping list. Reversible via undo_token.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id' => ['type' => 'integer'],
+                ],
+                'required' => ['id'],
+            ],
+        ],
+
+        // ---- Phase 2: Plan ----------------------------------------------------
+        [
+            'name'        => 'plan_clear_day',
+            'description' => 'Clear one day of the meal plan. Reversible via undo_token.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'day' => ['type' => 'string', 'enum' => ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']],
+                ],
+                'required' => ['day'],
+            ],
+        ],
+        [
+            'name'        => 'plan_clear_week',
+            'description' => 'Clear the entire 7-day meal plan. Preview-then-commit.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'confirm' => ['type' => 'boolean'],
+                ],
+            ],
+        ],
+        [
+            'name'        => 'plan_swap_days',
+            'description' => 'Swap whatever\'s assigned to day A with whatever\'s on day B (handles empty slots cleanly). Reversible.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'a' => ['type' => 'string', 'enum' => ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']],
+                    'b' => ['type' => 'string', 'enum' => ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']],
+                ],
+                'required' => ['a', 'b'],
+            ],
+        ],
+        [
+            'name'        => 'apply_week_plan',
+            'description' => 'Set multiple days at once. Each value must be the recipe id of an existing saved recipe (use recipe_search first to find ids). Preview-then-commit. Days you omit are left untouched.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'plan' => [
+                        'type' => 'object',
+                        'description' => 'Map of day → recipe_id. Use null to clear a day.',
+                        'properties' => [
+                            'Mon' => ['type' => ['integer','null']],
+                            'Tue' => ['type' => ['integer','null']],
+                            'Wed' => ['type' => ['integer','null']],
+                            'Thu' => ['type' => ['integer','null']],
+                            'Fri' => ['type' => ['integer','null']],
+                            'Sat' => ['type' => ['integer','null']],
+                            'Sun' => ['type' => ['integer','null']],
+                        ],
+                    ],
+                    'confirm' => ['type' => 'boolean'],
+                ],
+                'required' => ['plan'],
+            ],
+        ],
+
+        // ---- Phase 2: Settings + navigation ----------------------------------
+        [
+            'name'        => 'set_user_settings',
+            'description' => 'Update the user\'s tweaks (theme/mode/density/font/radius/units/etc). Each key is independently optional and validated against its enum. Reversible via undo_token. The client refreshes the page after a successful change.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'patch' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'density'        => ['type' => 'string', 'enum' => ['compact','cozy','airy']],
+                            'theme'          => ['type' => 'string', 'enum' => ['rainbow','sunset','ocean','garden']],
+                            'mode'           => ['type' => 'string', 'enum' => ['light','dark']],
+                            'font_pair'      => ['type' => 'string', 'enum' => ['default','serif','mono','rounded']],
+                            'radius'         => ['type' => 'string', 'enum' => ['sharp','default','round']],
+                            'card_style'     => ['type' => 'string', 'enum' => ['mix','photo-only','glyph-only']],
+                            'sticker_rotate' => ['type' => 'boolean'],
+                            'dot_grid'       => ['type' => 'boolean'],
+                            'units'          => ['type' => 'string', 'enum' => ['metric','imperial']],
+                        ],
+                    ],
+                ],
+                'required' => ['patch'],
+            ],
+        ],
+        [
+            'name'        => 'navigate',
+            'description' => 'Navigate the user to a whitelisted route. The client auto-follows the returned navigate_to URL.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'route' => ['type' => 'string', 'enum' => AI_NAV_ROUTES],
+                ],
+                'required' => ['route'],
+            ],
+        ],
+
+        // ---- Phase 2: Undo ---------------------------------------------------
+        [
+            'name'        => 'undo',
+            'description' => 'Reverse a previously committed reversible action by its undo_token. The token came back in the result of a prior tool call (favorite, shopping check, plan day, settings, etc.). Will fail gracefully if the token is unknown, already reversed, or for an action that can\'t be reversed.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'token' => ['type' => 'string'],
+                ],
+                'required' => ['token'],
+            ],
+        ],
     ];
 }
+
+/** Whitelist of routes the `navigate` tool may send the user to. */
+const AI_NAV_ROUTES = [
+    '/', '/favorites', '/pantry', '/shopping', '/plan', '/chat', '/add',
+];
 
 /** Token usage tally for a response (for surfacing to the UI). */
 function ai_usage(array $response): array {
