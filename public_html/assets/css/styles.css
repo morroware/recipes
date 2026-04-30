@@ -1728,7 +1728,7 @@ nav[aria-label="Primary"] [aria-current="page"] {
   .nav-brand { font-size: 18px; }
 
   /* Tweaks panel mobile fix */
-  .tweaks-panel { width: calc(100vw - 24px) !important; max-width: 360px; }
+  .tweaks-panel { width: calc(100vw - 24px) !important; max-width: 360px; bottom: 208px !important; max-height: calc(100vh - 228px) !important; }
 }
 
 /* ---------- Small tablet tweaks ---------- */
