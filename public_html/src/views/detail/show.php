@@ -7,6 +7,7 @@ $ingredientsJson = json_encode($recipe['ingredients'], JSON_UNESCAPED_UNICODE | 
 $stepsJson       = json_encode(array_column($recipe['steps'], 'text'), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 ?>
 <div class="page recipe-print"
+     data-page="recipes-show"
      data-recipe
      data-recipe-id="<?= (int)$recipe['id'] ?>"
      data-base-servings="<?= (int)$recipe['servings'] ?>"

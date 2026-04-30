@@ -14,18 +14,67 @@ class Memory {
 
     public const SOURCES = ['user', 'assistant', 'system'];
 
+    /**
+     * Memories that should never decay (hard constraints). Even if a user hasn't
+     * mentioned an allergy in a year, we keep treating it at full weight.
+     */
+    private const NEVER_DECAY = ['allergy', 'diet'];
+
     /** @return array<int, array<string,mixed>> */
     public static function listForUser(int $user_id, ?int $limit = null): array {
-        $sql = 'SELECT id, category, fact, source, weight, pinned, created_at, updated_at
-                  FROM ai_memories
-                 WHERE user_id = ?
-                 ORDER BY pinned DESC, weight DESC, updated_at DESC';
-        if ($limit !== null) {
-            $sql .= ' LIMIT ' . max(1, $limit);
-        }
-        $stmt = db()->prepare($sql);
+        // Fetch all rows for the user, then re-sort by effective (decayed)
+        // weight in PHP — that way limit truncation drops the right memories.
+        // Personal cookbooks rarely have more than a few hundred memories,
+        // so this is fine on cPanel.
+        $stmt = db()->prepare(
+            'SELECT id, category, fact, source, weight, pinned, created_at, updated_at
+               FROM ai_memories
+              WHERE user_id = ?'
+        );
         $stmt->execute([$user_id]);
-        return $stmt->fetchAll();
+        $rows = $stmt->fetchAll();
+
+        foreach ($rows as &$r) {
+            $r['effective_weight'] = self::effectiveWeight($r);
+        }
+        unset($r);
+        usort($rows, function ($a, $b) {
+            // Pinned wins, then effective weight, then most-recently-updated.
+            $pa = (int)($a['pinned'] ?? 0);
+            $pb = (int)($b['pinned'] ?? 0);
+            if ($pa !== $pb) return $pb - $pa;
+            $wa = (int)$a['effective_weight'];
+            $wb = (int)$b['effective_weight'];
+            if ($wa !== $wb) return $wb - $wa;
+            return strcmp((string)($b['updated_at'] ?? ''), (string)($a['updated_at'] ?? ''));
+        });
+
+        if ($limit !== null && $limit > 0 && count($rows) > $limit) {
+            $rows = array_slice($rows, 0, $limit);
+        }
+        return $rows;
+    }
+
+    /**
+     * Soft decay: a memory not reinforced in 180 days loses 1 weight per
+     * additional 90 days (capped at 2 total) — UNLESS it's an allergy/diet
+     * (those never decay) or pinned. Pure read-time recompute.
+     */
+    public static function effectiveWeight(array $row): int {
+        $weight = (int)($row['weight'] ?? 5);
+        if (!empty($row['pinned'])) return $weight;
+        $cat = (string)($row['category'] ?? 'other');
+        if (in_array($cat, self::NEVER_DECAY, true)) return $weight;
+
+        $updated = strtotime((string)($row['updated_at'] ?? '')) ?: 0;
+        if ($updated <= 0) return $weight;
+        $ageDays = (int)floor((time() - $updated) / 86400);
+        if ($ageDays <= 180) return $weight;
+
+        $decay = (int)floor(($ageDays - 180) / 90) + 1;
+        if ($decay > 2) $decay = 2;
+        $eff = $weight - $decay;
+        return $eff < 1 ? 1 : $eff;
     }
 
     public static function findById(int $user_id, int $id): ?array {
@@ -127,7 +176,12 @@ class Memory {
         return $stmt->rowCount();
     }
 
-    /** Group memories by category for compact LLM context. */
+    /**
+     * Group memories by category for compact LLM context. listForUser()
+     * already orders by (pinned DESC, effective_weight DESC) — so taking the
+     * first 80 here naturally drops low-weight unpinned items first while
+     * keeping pinned/allergy/diet memories on top.
+     */
     public static function groupedForContext(int $user_id): array {
         $rows = self::listForUser($user_id, 80);
         $by = [];

@@ -186,20 +186,18 @@ function ai_kitchen_context(int $user_id): string {
         $recipes = [];
     }
     $lines[] = '';
-    $lines[] = 'Existing recipe library (' . count($recipes) . '):';
-    foreach (array_slice($recipes, 0, 40) as $r) {
-        $tags = isset($r['tags']) && is_array($r['tags']) ? implode(',', $r['tags']) : '';
-        $lines[] = sprintf(
-            '  - %s (%s, %dm, %s)%s',
-            $r['title'],
-            $r['cuisine'] ?: 'no cuisine',
-            (int)$r['time_minutes'],
-            $r['difficulty'],
-            $tags ? ' #' . $tags : ''
-        );
+    // Titles only — the model has a `recipe_search` tool to fetch any one of
+    // these in full on demand. Keeps the cached system prompt cheap.
+    $lines[] = 'Recipe library (' . count($recipes) . ' saved — call `recipe_search` for full bodies):';
+    $titles = [];
+    foreach ($recipes as $r) {
+        $titles[] = (string)$r['title'];
     }
-    if (count($recipes) > 40) {
-        $lines[] = '  …and ' . (count($recipes) - 40) . ' more.';
+    foreach (array_slice($titles, 0, 80) as $t) {
+        $lines[] = '  - ' . $t;
+    }
+    if (count($titles) > 80) {
+        $lines[] = '  …and ' . (count($titles) - 80) . ' more (use `recipe_search` to find any of them).';
     }
     return implode("\n", $lines);
 }
@@ -287,6 +285,235 @@ function ai_full_context(int $user_id): string {
 }
 
 /**
+ * Normalise the per-page `window_context` payload sent by the client.
+ * Filters out unsafe shapes; keeps only fields we actively use.
+ *
+ * @param mixed $raw  whatever arrived in the request body
+ * @return array{
+ *   page:string, recipe_id:?int, selection_text:string,
+ *   filters:array<string,mixed>, visible_ids:int[]
+ * }
+ */
+function ai_normalize_window_context($raw): array {
+    $allowedPages = [
+        'recipes-index', 'recipes-show', 'recipes-edit', 'recipes-new',
+        'recipes-favorites', 'pantry', 'plan', 'shopping', 'chat',
+        'favorites', 'add', '',
+    ];
+    $page = '';
+    $recipeId = null;
+    $selection = '';
+    $filters = [];
+    $visible = [];
+
+    if (is_array($raw)) {
+        $p = (string)($raw['page'] ?? '');
+        if (in_array($p, $allowedPages, true)) $page = $p;
+
+        if (isset($raw['recipe_id']) && $raw['recipe_id'] !== '' && $raw['recipe_id'] !== null) {
+            $recipeId = (int)$raw['recipe_id'];
+            if ($recipeId <= 0) $recipeId = null;
+        }
+
+        $sel = (string)($raw['selection_text'] ?? '');
+        if ($sel !== '') {
+            $selection = mb_substr(trim($sel), 0, 800);
+        }
+
+        if (isset($raw['filters']) && is_array($raw['filters'])) {
+            foreach ($raw['filters'] as $k => $v) {
+                if (!is_string($k) || $k === '') continue;
+                if (mb_strlen($k) > 32) continue;
+                if (is_scalar($v)) {
+                    $filters[$k] = mb_substr((string)$v, 0, 128);
+                } elseif (is_array($v)) {
+                    $compact = [];
+                    foreach (array_slice($v, 0, 14, true) as $vk => $vv) {
+                        if (is_scalar($vv)) {
+                            $compact[(string)$vk] = mb_substr((string)$vv, 0, 64);
+                        }
+                    }
+                    if ($compact) $filters[$k] = $compact;
+                }
+            }
+        }
+
+        if (isset($raw['visible_ids']) && is_array($raw['visible_ids'])) {
+            foreach (array_slice($raw['visible_ids'], 0, 20) as $id) {
+                $n = (int)$id;
+                if ($n > 0 && !in_array($n, $visible, true)) $visible[] = $n;
+            }
+        }
+    }
+
+    return [
+        'page'           => $page,
+        'recipe_id'      => $recipeId,
+        'selection_text' => $selection,
+        'filters'        => $filters,
+        'visible_ids'    => $visible,
+    ];
+}
+
+/**
+ * Re-fetch authoritative data from the DB for whatever the client says it's
+ * showing, then build a `# Current view` system block. The model never sees
+ * the raw client payload — it sees what the server confirmed exists.
+ *
+ * IDs in `visible_ids` are filtered to ones owned by $user_id; recipe_id is
+ * loaded with full body (ingredients + steps) when present.
+ */
+function ai_view_context(int $user_id, array $ctx): string {
+    if ($ctx['page'] === '' && $ctx['recipe_id'] === null
+        && !$ctx['filters'] && !$ctx['visible_ids']
+        && $ctx['selection_text'] === '') {
+        return '';
+    }
+
+    $lines = ['# Current view'];
+    if ($ctx['page'] !== '') {
+        $lines[] = '- Page: ' . $ctx['page'];
+    }
+
+    $filterBits = [];
+    foreach ($ctx['filters'] as $k => $v) {
+        if (is_array($v)) {
+            $inner = [];
+            foreach ($v as $vk => $vv) {
+                $inner[] = $vk . '=' . $vv;
+            }
+            if ($inner) $filterBits[] = $k . '={' . implode(', ', $inner) . '}';
+        } else {
+            $filterBits[] = $k . '=' . $v;
+        }
+    }
+    if ($filterBits) {
+        $lines[] = '- Filters / view state: ' . implode('; ', $filterBits);
+    }
+
+    if ($ctx['selection_text'] !== '') {
+        $sel = $ctx['selection_text'];
+        $lines[] = '- User has the following text selected on the page:';
+        $lines[] = '  <selection>' . $sel . '</selection>';
+    }
+
+    if ($ctx['recipe_id'] !== null) {
+        try {
+            $recipe = Recipe::findFull($user_id, $ctx['recipe_id']);
+        } catch (Throwable $e) {
+            $recipe = null;
+        }
+        if ($recipe) {
+            $lines[] = '- Currently viewing recipe #' . (int)$recipe['id'] . ': "' . $recipe['title'] . '"';
+            $meta = [];
+            if (!empty($recipe['cuisine']))  $meta[] = $recipe['cuisine'];
+            if (!empty($recipe['time_minutes'])) $meta[] = (int)$recipe['time_minutes'] . 'm';
+            if (!empty($recipe['servings'])) $meta[] = 'serves ' . (int)$recipe['servings'];
+            if (!empty($recipe['difficulty'])) $meta[] = $recipe['difficulty'];
+            if ($meta) $lines[] = '  meta: ' . implode(' · ', $meta);
+            if (!empty($recipe['summary'])) {
+                $lines[] = '  summary: ' . mb_substr((string)$recipe['summary'], 0, 240);
+            }
+            if (!empty($recipe['ingredients'])) {
+                $lines[] = '  ingredients:';
+                foreach ($recipe['ingredients'] as $ing) {
+                    $qty  = isset($ing['qty']) && $ing['qty'] !== null ? rtrim(rtrim((string)$ing['qty'], '0'), '.') : '';
+                    $unit = (string)($ing['unit'] ?? '');
+                    $name = (string)($ing['name'] ?? '');
+                    $bits = array_filter([$qty, $unit, $name], fn($s) => $s !== '');
+                    if ($bits) $lines[] = '    - ' . implode(' ', $bits);
+                }
+            }
+            if (!empty($recipe['steps'])) {
+                $lines[] = '  steps:';
+                foreach ($recipe['steps'] as $i => $s) {
+                    $text = is_array($s) ? (string)($s['text'] ?? '') : (string)$s;
+                    $lines[] = '    ' . ($i + 1) . '. ' . mb_substr($text, 0, 320);
+                }
+            }
+            if (!empty($recipe['notes'])) {
+                $lines[] = '  user notes: ' . mb_substr((string)$recipe['notes'], 0, 240);
+            }
+        }
+    }
+
+    if (($ctx['page'] === 'shopping')) {
+        try {
+            $items = Shopping::listForUser($user_id);
+        } catch (Throwable $e) {
+            $items = [];
+        }
+        if ($items) {
+            $lines[] = '- Shopping list (' . count($items) . ' items):';
+            foreach (array_slice($items, 0, 40) as $it) {
+                $check = ((int)($it['checked'] ?? 0) === 1) ? '[x]' : '[ ]';
+                $qty = isset($it['qty']) && $it['qty'] !== null ? rtrim(rtrim((string)$it['qty'], '0'), '.') : '';
+                $unit = (string)($it['unit'] ?? '');
+                $name = (string)($it['name'] ?? '');
+                $src  = (string)($it['source_label'] ?? '');
+                $bits = array_filter([$qty, $unit, $name], fn($s) => $s !== '');
+                $line = '  ' . $check . ' ' . implode(' ', $bits);
+                if ($src !== '' && $src !== 'manual') $line .= ' (from ' . $src . ')';
+                $lines[] = $line;
+            }
+            if (count($items) > 40) {
+                $lines[] = '  …and ' . (count($items) - 40) . ' more.';
+            }
+        }
+    }
+
+    if ($ctx['page'] === 'plan') {
+        try {
+            $byDay = Plan::forUser($user_id);
+        } catch (Throwable $e) {
+            $byDay = [];
+        }
+        $planLines = [];
+        foreach ($byDay as $day => $entry) {
+            if ($entry) {
+                $planLines[] = $day . ': ' . $entry['title'] . ' (#' . (int)$entry['id'] . ')';
+            } else {
+                $planLines[] = $day . ': (empty)';
+            }
+        }
+        if ($planLines) {
+            $lines[] = '- This week\'s plan:';
+            foreach ($planLines as $l) $lines[] = '  ' . $l;
+        }
+    }
+
+    if ($ctx['visible_ids'] && $ctx['recipe_id'] === null
+        && !in_array($ctx['page'], ['plan', 'shopping'], true)) {
+        // Re-fetch each id and confirm ownership before naming them to the model.
+        $ids = $ctx['visible_ids'];
+        $pdo = db();
+        $place = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $pdo->prepare(
+            "SELECT id, title, cuisine, time_minutes, difficulty
+               FROM recipes
+              WHERE user_id = ? AND id IN ($place)
+              ORDER BY FIELD(id, $place)"
+        );
+        $params = array_merge([$user_id], $ids, $ids);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll();
+        if ($rows) {
+            $lines[] = '- Recipes currently visible on the page (' . count($rows) . '):';
+            foreach ($rows as $r) {
+                $lines[] = sprintf(
+                    '  - #%d %s (%s, %dm, %s)',
+                    (int)$r['id'], $r['title'],
+                    $r['cuisine'] ?: 'no cuisine',
+                    (int)$r['time_minutes'], $r['difficulty']
+                );
+            }
+        }
+    }
+
+    return count($lines) > 1 ? implode("\n", $lines) : '';
+}
+
+/**
  * Anthropic server-side web_search tool definition. The model executes
  * searches transparently — results come back in the same response, no
  * client-side handling needed.
@@ -307,6 +534,33 @@ function ai_web_search_tool(int $maxUses = 4): array {
 function ai_chat_tools(): array {
     $allowedCats = PANTRY_CATEGORIES;
     return [
+        [
+            'name'        => 'recipe_search',
+            'description' => 'Search the user\'s saved recipe book by free-text query (matches title, cuisine, summary, ingredient names, step text, and notes). Use this whenever the user mentions a saved recipe by partial name or by a remembered ingredient ("that pasta with capers", "my chickpea curry"). Returns up to 8 hits with full bodies (ingredients + steps), so you don\'t need to call recipe_get for those. Prefer this over guessing from the title-only library list.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'query'   => ['type' => 'string', 'description' => 'Free-text query. Empty string = list any recipes matching the optional filters.'],
+                    'cuisine' => ['type' => 'string', 'description' => 'Optional cuisine filter (exact match), e.g. "Italian", "Thai". Omit or use "" to skip.'],
+                    'tag'     => ['type' => 'string', 'description' => 'Optional tag filter (exact), e.g. "weeknight". Omit or use "" to skip.'],
+                    'time'    => ['type' => 'string', 'enum' => ['', '< 30 min', '30–60 min', '> 60 min'], 'description' => 'Optional total-time bucket.'],
+                    'favorites_only' => ['type' => 'boolean', 'description' => 'If true, only return ♥-marked recipes.'],
+                    'limit'   => ['type' => 'integer', 'minimum' => 1, 'maximum' => 20, 'description' => 'Max hits to return (default 8).'],
+                ],
+                'required' => ['query'],
+            ],
+        ],
+        [
+            'name'        => 'recipe_get',
+            'description' => 'Fetch one of the user\'s saved recipes by id, with full body (ingredients + steps + tags + notes). Use when the user references a recipe id you already know (e.g. from the # Current view block or a prior recipe_search hit) and you need the full body to act on it.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id' => ['type' => 'integer', 'description' => 'recipes.id'],
+                ],
+                'required' => ['id'],
+            ],
+        ],
         [
             'name'        => 'remember_preference',
             'description' => 'Save a stable fact about the user so it influences future suggestions. Use for dietary needs, allergies, dislikes, favorite cuisines, equipment, household size, skill, goals, etc. Do NOT save transient state like "wants tacos tonight".',
@@ -442,8 +696,379 @@ function ai_chat_tools(): array {
                 'required' => ['recipe_title'],
             ],
         ],
+
+        // ---- Phase 2: Recipes -------------------------------------------------
+        [
+            'name'        => 'open_recipe',
+            'description' => 'Navigate the user to a recipe page. Returns a navigate_to URL that the client auto-follows after the assistant reply settles.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id' => ['type' => 'integer', 'description' => 'recipes.id'],
+                ],
+                'required' => ['id'],
+            ],
+        ],
+        [
+            'name'        => 'update_recipe',
+            'description' => 'Edit recipe metadata (title, summary, cuisine, tags, time, servings, difficulty, glyph, color, notes). Preview-then-commit: first call with confirm=false returns the diff; only after the user says yes, call again with confirm=true.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id'    => ['type' => 'integer'],
+                    'patch' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'title'        => ['type' => 'string'],
+                            'summary'      => ['type' => 'string'],
+                            'cuisine'      => ['type' => 'string'],
+                            'time_minutes' => ['type' => 'integer', 'minimum' => 0],
+                            'servings'     => ['type' => 'integer', 'minimum' => 1],
+                            'difficulty'   => ['type' => 'string', 'enum' => ['Easy','Medium','Hard']],
+                            'glyph'        => ['type' => 'string'],
+                            'color'        => ['type' => 'string', 'enum' => ['mint','butter','peach','lilac','sky','blush','lime','coral']],
+                            'tags'         => ['type' => 'array', 'items' => ['type' => 'string']],
+                            'notes'        => ['type' => 'string'],
+                        ],
+                    ],
+                    'confirm' => ['type' => 'boolean'],
+                ],
+                'required' => ['id', 'patch'],
+            ],
+        ],
+        [
+            'name'        => 'update_recipe_ingredients',
+            'description' => 'Replace a recipe\'s entire ingredient list. Preview-then-commit. Pass the full new list — partial edits should be done by reading the current list (recipe_get) and submitting the merged result.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id'          => ['type' => 'integer'],
+                    'ingredients' => [
+                        'type'     => 'array',
+                        'minItems' => 1,
+                        'items'    => [
+                            'type'       => 'object',
+                            'properties' => [
+                                'qty'   => ['type' => ['string','null']],
+                                'unit'  => ['type' => 'string'],
+                                'name'  => ['type' => 'string'],
+                                'aisle' => ['type' => 'string', 'enum' => AISLES],
+                            ],
+                            'required' => ['name'],
+                        ],
+                    ],
+                    'confirm' => ['type' => 'boolean'],
+                ],
+                'required' => ['id', 'ingredients'],
+            ],
+        ],
+        [
+            'name'        => 'update_recipe_steps',
+            'description' => 'Replace a recipe\'s entire step list. Preview-then-commit. Pass the full new list in order.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id'      => ['type' => 'integer'],
+                    'steps'   => ['type' => 'array', 'minItems' => 1, 'items' => ['type' => 'string']],
+                    'confirm' => ['type' => 'boolean'],
+                ],
+                'required' => ['id', 'steps'],
+            ],
+        ],
+        [
+            'name'        => 'scale_recipe',
+            'description' => 'Compute a scaled ingredient list for target_servings. Preview-only by default — returns old → new amounts. With confirm=true AND save=true, the recipe is updated in place; with confirm=true AND save=false (default), no write happens and the model can present the scaled list to the user.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id'              => ['type' => 'integer'],
+                    'target_servings' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 100],
+                    'save'            => ['type' => 'boolean', 'description' => 'If true and confirm=true, persist the scaled values to the recipe. Default false (preview-only).'],
+                    'confirm'         => ['type' => 'boolean'],
+                ],
+                'required' => ['id', 'target_servings'],
+            ],
+        ],
+        [
+            'name'        => 'substitute_ingredient',
+            'description' => 'Swap one ingredient for another inside a recipe (string match against current ingredient names). Preview-then-commit. Honour the user\'s allergies/diet — refuse swaps that violate them.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id'      => ['type' => 'integer'],
+                    'from'    => ['type' => 'string', 'description' => 'Current ingredient name to replace (case-insensitive substring match).'],
+                    'to'      => ['type' => 'string', 'description' => 'Replacement ingredient name. Empty string = remove the ingredient.'],
+                    'reason'  => ['type' => 'string', 'description' => 'One-line why (allergy, preference, availability, etc.).'],
+                    'confirm' => ['type' => 'boolean'],
+                ],
+                'required' => ['id', 'from', 'to'],
+            ],
+        ],
+        [
+            'name'        => 'toggle_favorite',
+            'description' => 'Flip the ♥ favorite flag on a recipe. Reversible via undo_token. Commits immediately (no preview needed — the action itself is its own preview).',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id' => ['type' => 'integer'],
+                ],
+                'required' => ['id'],
+            ],
+        ],
+        [
+            'name'        => 'delete_recipe',
+            'description' => 'Permanently delete a recipe. Preview-then-commit, AND the user must include the literal recipe title in their most recent message before you commit. Refuse if you are not sure they want it gone.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id'      => ['type' => 'integer'],
+                    'confirm' => ['type' => 'boolean'],
+                ],
+                'required' => ['id'],
+            ],
+        ],
+
+        // ---- Phase 2: Pantry --------------------------------------------------
+        [
+            'name'        => 'pantry_search',
+            'description' => 'Search the user\'s pantry by partial ingredient name. Returns matching items with stock state.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'query'    => ['type' => 'string'],
+                    'in_stock' => ['type' => 'boolean', 'description' => 'Optional: filter to only in-stock (true) or only out-of-stock (false).'],
+                ],
+                'required' => ['query'],
+            ],
+        ],
+        [
+            'name'        => 'pantry_set_in_stock',
+            'description' => 'Mark a pantry item as in or out of stock. Reversible via undo_token. Commits immediately.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id'       => ['type' => 'integer'],
+                    'in_stock' => ['type' => 'boolean'],
+                ],
+                'required' => ['id', 'in_stock'],
+            ],
+        ],
+        [
+            'name'        => 'pantry_restock',
+            'description' => 'Mark a pantry item as just-purchased (sets in_stock=1, last_bought=now, increments purchase_count). Reversible.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id' => ['type' => 'integer'],
+                ],
+                'required' => ['id'],
+            ],
+        ],
+        [
+            'name'        => 'pantry_remove',
+            'description' => 'Delete a pantry item entirely (not the same as out-of-stock). Preview-then-commit because this destroys purchase history.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id'      => ['type' => 'integer'],
+                    'confirm' => ['type' => 'boolean'],
+                ],
+                'required' => ['id'],
+            ],
+        ],
+        [
+            'name'        => 'pantry_update',
+            'description' => 'Patch a pantry item\'s qty / unit / category. Reversible via undo_token. Commits immediately.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id'       => ['type' => 'integer'],
+                    'qty'      => ['type' => ['string','null']],
+                    'unit'     => ['type' => 'string'],
+                    'category' => ['type' => 'string', 'enum' => $allowedCats],
+                ],
+                'required' => ['id'],
+            ],
+        ],
+
+        // ---- Phase 2: Shopping ------------------------------------------------
+        [
+            'name'        => 'shopping_check',
+            'description' => 'Check or uncheck an item on the shopping list. Reversible.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id'      => ['type' => 'integer'],
+                    'checked' => ['type' => 'boolean'],
+                ],
+                'required' => ['id', 'checked'],
+            ],
+        ],
+        [
+            'name'        => 'shopping_clear_checked',
+            'description' => 'Remove every checked item from the shopping list. Preview-then-commit (destructive bulk).',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'confirm' => ['type' => 'boolean'],
+                ],
+            ],
+        ],
+        [
+            'name'        => 'shopping_organize_by_aisle',
+            'description' => 'Reassign every shopping item to an aisle bucket and reorder the list so same-aisle items group together. Preview-then-commit.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'assignments' => [
+                        'type' => 'array',
+                        'description' => 'Full list of {id, aisle} pairs covering every item currently on the list.',
+                        'items' => [
+                            'type' => 'object',
+                            'properties' => [
+                                'id'    => ['type' => 'integer'],
+                                'aisle' => ['type' => 'string', 'enum' => AISLES],
+                            ],
+                            'required' => ['id', 'aisle'],
+                        ],
+                    ],
+                    'confirm' => ['type' => 'boolean'],
+                ],
+                'required' => ['assignments'],
+            ],
+        ],
+        [
+            'name'        => 'shopping_build_from_plan',
+            'description' => 'Append every assigned day\'s recipe ingredients to the shopping list (dedupes against existing per-recipe entries). Same as the "🛒 Build shopping list" button.',
+            'input_schema' => ['type' => 'object', 'properties' => new stdClass()],
+        ],
+        [
+            'name'        => 'shopping_remove',
+            'description' => 'Remove one item from the shopping list. Reversible via undo_token.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id' => ['type' => 'integer'],
+                ],
+                'required' => ['id'],
+            ],
+        ],
+
+        // ---- Phase 2: Plan ----------------------------------------------------
+        [
+            'name'        => 'plan_clear_day',
+            'description' => 'Clear one day of the meal plan. Reversible via undo_token.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'day' => ['type' => 'string', 'enum' => ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']],
+                ],
+                'required' => ['day'],
+            ],
+        ],
+        [
+            'name'        => 'plan_clear_week',
+            'description' => 'Clear the entire 7-day meal plan. Preview-then-commit.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'confirm' => ['type' => 'boolean'],
+                ],
+            ],
+        ],
+        [
+            'name'        => 'plan_swap_days',
+            'description' => 'Swap whatever\'s assigned to day A with whatever\'s on day B (handles empty slots cleanly). Reversible.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'a' => ['type' => 'string', 'enum' => ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']],
+                    'b' => ['type' => 'string', 'enum' => ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']],
+                ],
+                'required' => ['a', 'b'],
+            ],
+        ],
+        [
+            'name'        => 'apply_week_plan',
+            'description' => 'Set multiple days at once. Each value must be the recipe id of an existing saved recipe (use recipe_search first to find ids). Preview-then-commit. Days you omit are left untouched.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'plan' => [
+                        'type' => 'object',
+                        'description' => 'Map of day → recipe_id. Use null to clear a day.',
+                        'properties' => [
+                            'Mon' => ['type' => ['integer','null']],
+                            'Tue' => ['type' => ['integer','null']],
+                            'Wed' => ['type' => ['integer','null']],
+                            'Thu' => ['type' => ['integer','null']],
+                            'Fri' => ['type' => ['integer','null']],
+                            'Sat' => ['type' => ['integer','null']],
+                            'Sun' => ['type' => ['integer','null']],
+                        ],
+                    ],
+                    'confirm' => ['type' => 'boolean'],
+                ],
+                'required' => ['plan'],
+            ],
+        ],
+
+        // ---- Phase 2: Settings + navigation ----------------------------------
+        [
+            'name'        => 'set_user_settings',
+            'description' => 'Update the user\'s tweaks (theme/mode/density/font/radius/units/etc). Each key is independently optional and validated against its enum. Reversible via undo_token. The client refreshes the page after a successful change.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'patch' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'density'        => ['type' => 'string', 'enum' => ['compact','cozy','airy']],
+                            'theme'          => ['type' => 'string', 'enum' => ['rainbow','sunset','ocean','garden']],
+                            'mode'           => ['type' => 'string', 'enum' => ['light','dark']],
+                            'font_pair'      => ['type' => 'string', 'enum' => ['default','serif','mono','rounded']],
+                            'radius'         => ['type' => 'string', 'enum' => ['sharp','default','round']],
+                            'card_style'     => ['type' => 'string', 'enum' => ['mix','photo-only','glyph-only']],
+                            'sticker_rotate' => ['type' => 'boolean'],
+                            'dot_grid'       => ['type' => 'boolean'],
+                            'units'          => ['type' => 'string', 'enum' => ['metric','imperial']],
+                        ],
+                    ],
+                ],
+                'required' => ['patch'],
+            ],
+        ],
+        [
+            'name'        => 'navigate',
+            'description' => 'Navigate the user to a whitelisted route. The client auto-follows the returned navigate_to URL.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'route' => ['type' => 'string', 'enum' => AI_NAV_ROUTES],
+                ],
+                'required' => ['route'],
+            ],
+        ],
+
+        // ---- Phase 2: Undo ---------------------------------------------------
+        [
+            'name'        => 'undo',
+            'description' => 'Reverse a previously committed reversible action by its undo_token. The token came back in the result of a prior tool call (favorite, shopping check, plan day, settings, etc.). Will fail gracefully if the token is unknown, already reversed, or for an action that can\'t be reversed.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'token' => ['type' => 'string'],
+                ],
+                'required' => ['token'],
+            ],
+        ],
     ];
 }
+
+/** Whitelist of routes the `navigate` tool may send the user to. */
+const AI_NAV_ROUTES = [
+    '/', '/favorites', '/pantry', '/shopping', '/plan', '/chat', '/add',
+];
 
 /** Token usage tally for a response (for surfacing to the UI). */
 function ai_usage(array $response): array {

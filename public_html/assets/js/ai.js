@@ -3,6 +3,7 @@
 // suggestions + recipe import. The full chat experience lives at /chat.
 
 import { apiFetch, toast, appUrl } from './app.js';
+import { getWindowContext } from './window-context.js';
 
 let aiEnabled = null;
 let panelEl = null;
@@ -19,11 +20,6 @@ function setChatConversationId(id) {
     if (chatConversationId) localStorage.setItem(CONV_STORAGE_KEY, String(chatConversationId));
     else localStorage.removeItem(CONV_STORAGE_KEY);
   } catch {}
-}
-
-function pageContext() {
-  const el = document.querySelector('[data-page]');
-  return el ? el.getAttribute('data-page') : '';
 }
 
 async function ensureStatus() {
@@ -160,7 +156,7 @@ function wirePanel(panel) {
         body: JSON.stringify({
           conversation_id: chatConversationId,
           message: text,
-          page: pageContext(),
+          window_context: getWindowContext(),
         }),
       });
       setChatConversationId(data.conversation_id || chatConversationId);
@@ -173,6 +169,7 @@ function wirePanel(panel) {
         const log = panelEl.querySelector('[data-ai="chatlog"]');
         log.appendChild(note);
         log.scrollTop = log.scrollHeight;
+        applySideEffects(data.actions);
       }
     } catch (e) {
       busyEl.classList.remove('ai-busy');
@@ -316,7 +313,52 @@ function describeAction(a) {
       return `📚 saved "${t}" to your book`;
     }
     case 'log_cooked_recipe':    return `🍽️ logged: ${i.recipe_title}`;
+    // ---- Phase 2 ---------------------------------------------------------
+    case 'recipe_search':        return `🔎 searched recipes (${r.count || 0})`;
+    case 'recipe_get':           return `📖 loaded ${r.recipe?.title || ('#' + i.id)}`;
+    case 'open_recipe':          return `↗ opening "${r.title || ('#' + i.id)}"…`;
+    case 'update_recipe':        return r.preview ? '👀 previewed recipe edits' : '✏️ updated recipe';
+    case 'update_recipe_ingredients': return r.preview ? '👀 previewed new ingredient list' : '🥕 replaced ingredients';
+    case 'update_recipe_steps':  return r.preview ? '👀 previewed new steps' : '📝 replaced steps';
+    case 'scale_recipe':         return r.committed ? `📏 scaled → ${r.to_servings} servings` : `📏 scaled preview → ${r.to_servings} servings`;
+    case 'substitute_ingredient':return r.preview ? '👀 sub preview' : `🔄 ${i.from} → ${i.to || '(removed)'}`;
+    case 'toggle_favorite':      return r.is_favorite ? '♥ favorited' : '♡ unfavorited';
+    case 'delete_recipe':        return r.preview ? `👀 preview delete "${r.title}"` : `🗑️ deleted "${r.title}"`;
+    case 'pantry_search':        return `🔎 pantry search (${r.count || 0})`;
+    case 'pantry_set_in_stock':  return `${i.in_stock ? '✓' : '✗'} ${r.item?.name || ('#' + i.id)}`;
+    case 'pantry_restock':       return `🥕 restocked ${r.item?.name || ('#' + i.id)}`;
+    case 'pantry_remove':        return r.preview ? '👀 preview pantry remove' : '🗑️ removed from pantry';
+    case 'pantry_update':        return `✏️ pantry updated: ${r.item?.name || ''}`;
+    case 'shopping_check':       return `${i.checked ? '☑' : '☐'} ${r.item?.name || ('#' + i.id)}`;
+    case 'shopping_clear_checked':return r.preview ? `👀 preview clear (${r.count})` : `🧹 cleared ${r.removed} checked`;
+    case 'shopping_organize_by_aisle': return r.preview ? '👀 aisle preview' : `📂 organised ${r.count} by aisle`;
+    case 'shopping_build_from_plan': return `🛒 +${r.added} from ${r.recipes} recipe${r.recipes === 1 ? '' : 's'}`;
+    case 'shopping_remove':      return `🗑️ removed ${r.name || ('#' + i.id)}`;
+    case 'plan_clear_day':       return `🧹 cleared ${i.day}`;
+    case 'plan_clear_week':      return r.preview ? `👀 preview clear week` : `🧹 cleared the week`;
+    case 'plan_swap_days':       return `🔁 ${i.a} ↔ ${i.b}`;
+    case 'apply_week_plan':      return r.preview ? `👀 plan preview` : `📅 applied to ${r.applied_count} day${r.applied_count === 1 ? '' : 's'}`;
+    case 'set_user_settings':    return `⚙️ settings: ${Object.keys(r.changed || {}).join(', ') || '(none)'}`;
+    case 'navigate':             return `↗ navigating…`;
+    case 'undo':                 return r.ok ? `↶ undone (${r.reversed})` : `↶ undo failed`;
     default: return `↺ ${a && a.tool}`;
+  }
+}
+
+function applySideEffects(actions) {
+  if (!actions || !actions.length) return;
+  let navTarget = null;
+  let needsReload = false;
+  for (const a of actions) {
+    const r = a && a.result;
+    if (!r || r.ok === false) continue;
+    if (r.navigate_to && !navTarget) navTarget = r.navigate_to;
+    if (r.reload) needsReload = true;
+  }
+  if (navTarget) {
+    setTimeout(() => { window.location.href = navTarget; }, 900);
+  } else if (needsReload) {
+    setTimeout(() => { window.location.reload(); }, 900);
   }
 }
 

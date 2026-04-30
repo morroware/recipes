@@ -5,6 +5,7 @@
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
+DROP TABLE IF EXISTS ai_tool_audit;
 DROP TABLE IF EXISTS ai_messages;
 DROP TABLE IF EXISTS ai_conversations;
 DROP TABLE IF EXISTS ai_memories;
@@ -191,6 +192,28 @@ CREATE TABLE ai_messages (
   PRIMARY KEY (id),
   KEY idx_ai_messages_conv (conversation_id, id),
   CONSTRAINT fk_ai_messages_conv FOREIGN KEY (conversation_id) REFERENCES ai_conversations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
+-- AI: audit log of every tool call (Phase 2). Captures input, result, and an
+-- optional undo_payload so the chat UI can offer "Undo" on simple actions.
+CREATE TABLE ai_tool_audit (
+  id              INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id         INT UNSIGNED NOT NULL,
+  conversation_id INT UNSIGNED NULL,
+  tool            VARCHAR(64) NOT NULL,
+  input_json      MEDIUMTEXT NULL,
+  result_json     MEDIUMTEXT NULL,
+  undo_token      VARCHAR(32) NULL,
+  undo_payload    MEDIUMTEXT NULL,
+  ok              TINYINT(1) NOT NULL DEFAULT 1,
+  reversed_at     DATETIME NULL,
+  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_ai_tool_audit_user_date (user_id, created_at),
+  KEY idx_ai_tool_audit_undo (user_id, undo_token),
+  CONSTRAINT fk_ai_tool_audit_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_ai_tool_audit_conv FOREIGN KEY (conversation_id) REFERENCES ai_conversations(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------

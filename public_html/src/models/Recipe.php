@@ -80,6 +80,103 @@ class Recipe {
         return $r;
     }
 
+    /** Lightweight existence/lookup — bare row, no ingredients/steps. */
+    public static function findById(int $user_id, int $recipe_id): ?array {
+        $stmt = db()->prepare(
+            'SELECT id, slug, title, cuisine, summary, time_minutes, servings,
+                    difficulty, glyph, color, photo_url, is_favorite
+               FROM recipes
+              WHERE id = ? AND user_id = ? LIMIT 1'
+        );
+        $stmt->execute([$recipe_id, $user_id]);
+        $r = $stmt->fetch();
+        return $r ?: null;
+    }
+
+    /**
+     * Recipe-RAG search across the user's library. Looks at title, cuisine,
+     * summary, notes, ingredient names, step text, and tag — so the assistant
+     * can find a saved recipe by partial title, cuisine, or remembered
+     * ingredient.
+     *
+     * Pure LIKE (no FULLTEXT) so it works on every MySQL/MariaDB version a
+     * shared cPanel host might run. Personal cookbooks rarely exceed a few
+     * hundred rows; this is plenty fast.
+     *
+     * Each row in the result is a full recipe (ingredients + steps + tags).
+     *
+     * @param array{cuisine?:string, tag?:string, time?:string, favorites_only?:bool} $filters
+     * @return array<int, array<string,mixed>>
+     */
+    public static function search(int $user_id, string $query, array $filters = [], int $limit = 8): array {
+        $query = trim($query);
+        $limit = max(1, min(20, $limit));
+
+        $select = 'SELECT DISTINCT r.id, r.title, r.cuisine, r.summary, r.time_minutes,
+                          r.servings, r.difficulty, r.glyph, r.color, r.is_favorite';
+        $from   = 'FROM recipes r';
+        $joins  = [];
+        $where  = ['r.user_id = :uid'];
+        $params = [':uid' => $user_id];
+
+        if ($query !== '') {
+            $joins[] = 'LEFT JOIN ingredients i ON i.recipe_id = r.id';
+            $joins[] = 'LEFT JOIN steps s ON s.recipe_id = r.id';
+            $where[] = '(r.title LIKE :q OR r.cuisine LIKE :q OR r.summary LIKE :q'
+                     . ' OR r.notes LIKE :q OR i.name LIKE :q OR s.text LIKE :q)';
+            $params[':q'] = '%' . $query . '%';
+        }
+
+        if (!empty($filters['cuisine']) && $filters['cuisine'] !== 'All') {
+            $where[] = 'r.cuisine = :cuisine';
+            $params[':cuisine'] = (string)$filters['cuisine'];
+        }
+        if (!empty($filters['tag'])) {
+            $joins[] = 'INNER JOIN recipe_tags rt ON rt.recipe_id = r.id AND rt.tag = :tag';
+            $params[':tag'] = (string)$filters['tag'];
+        }
+        if (!empty($filters['time']) && $filters['time'] !== 'All') {
+            switch ($filters['time']) {
+                case '< 30 min':   $where[] = 'r.time_minutes < 30'; break;
+                case '30–60 min':  $where[] = 'r.time_minutes BETWEEN 30 AND 60'; break;
+                case '> 60 min':   $where[] = 'r.time_minutes > 60'; break;
+            }
+        }
+        if (!empty($filters['favorites_only'])) {
+            $where[] = 'r.is_favorite = 1';
+        }
+
+        $sql = $select . ' ' . $from
+             . ($joins ? ' ' . implode(' ', $joins) : '')
+             . ' WHERE ' . implode(' AND ', $where);
+
+        // Prefer matches in title/cuisine over deep matches in steps/notes.
+        if ($query !== '') {
+            $sql .= ' ORDER BY (CASE'
+                  . ' WHEN r.title LIKE :q THEN 1'
+                  . ' WHEN r.cuisine LIKE :q THEN 2'
+                  . ' WHEN r.summary LIKE :q THEN 3'
+                  . ' ELSE 4 END), r.is_favorite DESC, r.title ASC';
+        } else {
+            $sql .= ' ORDER BY r.is_favorite DESC, r.title ASC';
+        }
+        $sql .= ' LIMIT ' . $limit;
+
+        $stmt = db()->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll();
+        if (!$rows) return [];
+
+        // Hydrate full body so the model gets ingredients + steps without
+        // a second tool call.
+        $out = [];
+        foreach ($rows as $row) {
+            $full = self::findFull($user_id, (int)$row['id']);
+            if ($full) $out[] = $full;
+        }
+        return $out;
+    }
+
     public static function ingredients(int $recipe_id): array {
         $stmt = db()->prepare('SELECT id, position, qty, unit, name, aisle FROM ingredients WHERE recipe_id = ? ORDER BY position ASC, id ASC');
         $stmt->execute([$recipe_id]);

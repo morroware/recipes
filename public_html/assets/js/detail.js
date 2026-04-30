@@ -3,9 +3,16 @@
 // autosaving notes. Ported from project/pages-a.jsx (DetailPage + CookMode).
 
 import { apiFetch, toast } from './app.js';
+import { setWindowContext } from './window-context.js';
 
 const root = document.querySelector('[data-recipe]');
 if (root) {
+  setWindowContext({
+    page: 'recipes-show',
+    recipe_id: parseInt(root.dataset.recipeId || '0', 10) || null,
+    visible_ids: [parseInt(root.dataset.recipeId || '0', 10) || 0].filter(Boolean),
+  });
+
 
   // ---- ingredient JSON pulled from the page payload --------------------------
   const ingsEl  = document.querySelector('[data-bind="recipe-ingredients"]');

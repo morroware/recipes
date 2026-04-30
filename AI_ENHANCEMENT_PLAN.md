@@ -4,9 +4,17 @@ A phased, checkable plan to evolve the in-app AI assistant from a useful sidekic
 into a polished, fully site-aware co-pilot that can operate every surface of the
 Personal Recipe Book app.
 
-**Working branch:** `claude/enhance-aiu-assistant-gKreq`
+**Working branch:** `claude/enhance-aiu-assistant-gKreq` (Phase 0/1 prep);
+Phase 1 site-awareness landed on `claude/sprout-ai-aware-cpanel-uztqc`.
 **Target stack (unchanged):** vanilla PHP 8.1+ · MySQL · plain ES modules ·
 Anthropic Messages API (Claude Sonnet 4.6) with prompt caching.
+
+**cPanel constraint:** the deployed site runs on shared cPanel hosting.
+Anything that requires long-lived HTTP connections (SSE), background workers,
+DDL beyond the standard `schema.sql` install, or non-portable MySQL features
+(FULLTEXT, stored procedures via PDO, etc.) is intentionally avoided unless
+clearly necessary. Search is LIKE-based, no streaming, all reads/writes go
+through the existing PDO layer.
 
 ---
 
@@ -78,7 +86,7 @@ Make the assistant know *exactly* where the user is and what they're looking at.
 
 ### 1.1 Per-page context payload
 
-- [ ] **New JS module `assets/js/window-context.js`**
+- [x] **New JS module `assets/js/window-context.js`**
   Exports `getWindowContext()` that returns a normalised object:
   ```js
   {
@@ -91,15 +99,21 @@ Make the assistant know *exactly* where the user is and what they're looking at.
   ```
   Each page-specific module (`browse.js`, `pantry.js`, `plan.js`, `shopping.js`,
   `detail.js`, `add.js`) calls a `setWindowContext({...})` helper to publish
-  its slice.
-- [ ] **Both chat surfaces send `window_context` on every request**
-  Replace the existing `page` string with the full object on
-  `/api/ai/chat`.
+  its slice. `getWindowContext()` falls back to scanning `[data-page]` and
+  `[data-recipe-id]` in the DOM when no explicit publish has happened.
+- [x] **Both chat surfaces send `window_context` on every request**
+  `/chat` and the floating panel both attach the full object on
+  `/api/ai/chat`. The old `page` string is still accepted server-side as a
+  fallback for older clients.
   Files: `assets/js/chat.js`, `assets/js/ai.js`.
-- [ ] **Server hydrates context server-side**
-  In `apiChat`, take the trusted IDs from the payload, *re-fetch* the actual
-  records (recipe body, current shopping list, current plan) from the DB,
-  and append a `# Current view` block to the system prompt.
+- [x] **Server hydrates context server-side**
+  `ai_normalize_window_context()` sanitises the payload, then
+  `ai_view_context()` re-fetches owned records (recipe body for
+  `recipe_id`, full shopping list for `/shopping`, full plan for `/plan`,
+  visible-on-page recipes elsewhere) and emits a `# Current view` block.
+  The block is sent as a **separate, uncached** system block so the stable
+  cached prefix (personality + memories + tool rules) keeps hitting the
+  ephemeral cache; only the per-turn view block is uncached.
   Files: `src/controllers/AiController.php`, `src/lib/ai.php`.
 
 **Acceptance:** From `/recipes/42` say "halve the salt in this" — the model
@@ -108,52 +122,65 @@ sees the actual recipe body and proposes the edit. From `/shopping` say
 
 ### 1.2 Recipe RAG tool
 
-- [ ] **New tool `recipe_search(query, filters)`**
-  Server runs FULLTEXT (or LIKE fallback) across `recipes.title`,
-  `recipes.summary`, `recipes.notes`, `ingredients.name`, `steps.text`.
-  Returns up to 8 hits with full bodies (ingredients + steps).
-  Files: `src/lib/ai.php` (tool def), `src/models/Recipe.php` (search
-  method), `src/controllers/AiController.php` (handler).
-- [ ] **New tool `recipe_get(id)`**
-  Returns one full recipe by id.
-- [ ] **Add a FULLTEXT index migration** if one doesn't already exist.
-  Files: `db/migrations/003_recipe_fulltext.sql`.
-- [ ] **Trim `ai_kitchen_context` to titles only** now that the model has
-  a tool to fetch on demand. Reduces baseline token cost.
+- [x] **New tool `recipe_search(query, filters)`**
+  Server runs LIKE-based search across `recipes.title`, `recipes.cuisine`,
+  `recipes.summary`, `recipes.notes`, `ingredients.name`, `steps.text` with
+  optional cuisine/tag/time/favorites filters. Returns up to 8 hits with full
+  bodies (ingredients + steps + tags). Title/cuisine matches rank above
+  step/note matches.
+  Files: `src/lib/ai.php` (tool def), `src/models/Recipe.php` (`search`),
+  `src/controllers/AiController.php` (handler + `shapeRecipeForModel`).
+- [x] **New tool `recipe_get(id)`**
+  Returns one full recipe by id (lightweight wrapper around `Recipe::findFull`).
+- [ ] ~~Add a FULLTEXT index migration~~
+  **Skipped — incompatible with the cPanel constraint.** `ALTER TABLE … ADD
+  FULLTEXT` isn't idempotent across all MySQL/MariaDB versions a shared host
+  might run, and stored-procedure-based guards aren't reliably executable via
+  PDO `exec`. LIKE search across a typical personal cookbook (≤500 rows) is
+  fast enough and works on every host. Revisit if a user complains about
+  search latency at scale.
+- [x] **Trim `ai_kitchen_context` to titles only**
+  The model now has `recipe_search` to pull full bodies on demand. Library
+  list in the cached system prompt is title-only (cap raised from 40 → 80
+  titles, with a footer pointing the model at the search tool when there are
+  more).
 
 **Acceptance:** The 40-recipe-title cap stops mattering; user can ask about a
 specific saved recipe by name and the model retrieves it.
 
 ### 1.3 Memory weighting
 
-- [ ] **Use `weight` + `pinned` in `ai_profile_context`**
-  Order memories DESC by `(pinned, weight)`. When truncating, drop
-  low-weight unpinned ones first.
-- [ ] **Soft decay** for memories not reinforced in 180 days (excluding
-  allergy/diet which never decay): downweight by 1 every 90 days, capped at 2.
-  Implemented as a read-time recompute, not a write — no cron needed.
-  Files: `src/models/Memory.php`, `src/lib/ai.php`.
+- [x] **Use `weight` + `pinned` in `ai_profile_context`**
+  `Memory::listForUser` now sorts by `(pinned DESC, effective_weight DESC,
+  updated_at DESC)`. `groupedForContext` (used by `ai_profile_context`)
+  inherits that ordering, so when truncated it drops low-effective-weight
+  unpinned memories first.
+- [x] **Soft decay** for memories not reinforced in 180 days (excluding
+  `allergy` and `diet`, which never decay, and pinned memories): downweight
+  by 1 per additional 90 days past 180, capped at 2 total. Pure read-time
+  recompute — no cron, no DB writes. `Memory::add`'s existing dedupe path
+  already touches `updated_at`, so re-mentioning a fact resets its decay.
+  Files: `src/models/Memory.php`.
 
 **Acceptance:** Strong allergy memories always survive truncation; stale
 "likes" fade unless the user re-mentions them.
 
 ### 1.4 Streaming responses (SSE)
 
-- [ ] **Stream `/api/ai/chat` over SSE**
-  Switch `ai_call` to support `stream: true`; relay deltas to the browser.
-  Tool-use loop still works — emit `event: tool` and `event: text` frames.
-  Files: `src/lib/ai.php`, `src/controllers/AiController.php`.
-- [ ] **Client renders incremental text**
-  Update both `chat.js` and `ai.js` to consume SSE; keep the existing
-  fallback for non-SSE clients.
-- [ ] **Cancellable** — user can abort an in-flight reply.
-
-**Acceptance:** Replies stream within ~500ms. Long answers feel smooth.
-Aborting stops the request.
+- [ ] **Deferred — cPanel-hostile.** Shared cPanel hosts buffer PHP output
+  through Apache/LiteSpeed and frequently kill long-lived FCGI workers,
+  which makes SSE flaky and resource-heavy on the exact deployment target.
+  We'll revisit this when (a) the user moves off shared hosting, or (b) we
+  add a polling-based "incremental" UX that doesn't rely on a long-lived
+  connection. The current non-streaming path is plenty responsive for a
+  personal cookbook.
 
 **Phase 1 done when:** an end-to-end demo on each main page produces
-contextual answers with streaming and the model uses `recipe_search` rather
-than guessing from the title list.
+contextual answers and the model uses `recipe_search` rather than guessing
+from the title list. Streaming is explicitly out of scope on cPanel.
+
+**Phase 1 status (claude/sprout-ai-aware-cpanel-uztqc):** 1.1, 1.2, and 1.3
+landed; 1.4 deferred per cPanel constraint above.
 
 ---
 
@@ -167,58 +194,81 @@ Give the model a tool for every meaningful action on every page.
 
 ### 2.1 Recipes
 
-- [ ] `open_recipe(id)` → returns `{navigate_to: '/recipes/:id'}`; client
-  auto-navigates after the assistant reply settles.
-- [ ] `update_recipe(id, patch)` (preview/commit) — title, summary,
+- [x] `open_recipe(id)` → returns `{navigate_to: '/recipes/:id'}`; client
+  auto-navigates ~900ms after the assistant reply settles.
+- [x] `update_recipe(id, patch)` (preview/commit) — title, summary,
   cuisine, time, servings, difficulty, glyph, color, tags, notes.
-- [ ] `update_recipe_ingredients(id, ingredients[])` (preview/commit)
-- [ ] `update_recipe_steps(id, steps[])` (preview/commit)
-- [ ] `scale_recipe(id, target_servings)` — server computes scaled
-  ingredients; preview shows old → new; commit updates or returns a
-  scaled copy without saving (user choice).
-- [ ] `substitute_ingredient(id, from, to, reason)` — applies a swap
-  with allergy-aware validation.
-- [ ] `toggle_favorite(id)`
-- [ ] `delete_recipe(id)` (preview/commit, requires explicit confirm
-  string in the user message)
+- [x] `update_recipe_ingredients(id, ingredients[])` (preview/commit)
+- [x] `update_recipe_steps(id, steps[])` (preview/commit)
+- [x] `scale_recipe(id, target_servings)` — server computes scaled
+  ingredients; preview shows old → new; `confirm=true save=true` persists
+  (default behaviour is non-destructive preview).
+- [x] `substitute_ingredient(id, from, to, reason)` — applies a swap;
+  allergy-aware enforcement is delegated to the model via the system prompt.
+- [x] `toggle_favorite(id)` — instant + reversible via `undo_token`.
+- [x] `delete_recipe(id)` (preview/commit; system prompt instructs the
+  assistant to require the user to repeat the title before commit).
 
 ### 2.2 Pantry
 
-- [ ] `pantry_search(query)`
-- [ ] `pantry_set_in_stock(id, in_stock: bool)`
-- [ ] `pantry_restock(id)`
-- [ ] `pantry_remove(id)` (preview/commit)
-- [ ] `pantry_update(id, patch)` — qty, unit, category
+- [x] `pantry_search(query)` — partial-name + optional in_stock filter.
+- [x] `pantry_set_in_stock(id, in_stock: bool)` — instant + reversible.
+- [x] `pantry_restock(id)` — instant + reversible (snapshots
+  `purchase_count` + `last_bought` for accurate undo).
+- [x] `pantry_remove(id)` (preview/commit).
+- [x] `pantry_update(id, patch)` — qty/unit/category, instant + reversible.
 
 ### 2.3 Shopping
 
-- [ ] `shopping_check(id, checked: bool)`
-- [ ] `shopping_clear_checked()`
-- [ ] `shopping_organize_by_aisle()` — model-driven categorisation
-- [ ] `shopping_build_from_plan()` — wraps existing
-  `PlanController::apiBuildShopping`
-- [ ] `shopping_remove(id)`
+- [x] `shopping_check(id, checked: bool)` — instant + reversible.
+- [x] `shopping_clear_checked()` (preview/commit).
+- [x] `shopping_organize_by_aisle()` — model supplies full {id,aisle}
+  assignments; server reorders and persists.
+- [x] `shopping_build_from_plan()` — wraps `Plan::buildShoppingList`.
+- [x] `shopping_remove(id)` — instant + reversible (full row snapshot
+  for re-insertion on undo).
 
 ### 2.4 Plan
 
-- [ ] `plan_clear_day(day)`
-- [ ] `plan_clear_week()`
-- [ ] `plan_swap_days(a, b)`
-- [ ] `apply_week_plan({Mon: recipe_id|recipe_idea, …})` (preview/commit) —
-  one call to fill a whole week (extends `apiPlanWeek`).
+- [x] `plan_clear_day(day)` — instant + reversible (snapshots prev id).
+- [x] `plan_clear_week()` (preview/commit + reversible — full week snapshot).
+- [x] `plan_swap_days(a, b)` — instant + reversible (symmetric swap).
+- [x] `apply_week_plan({Mon: recipe_id|null, …})` (preview/commit) —
+  values must be ids of existing recipes (model uses `recipe_search` to
+  find them first). `recipe_idea` strings are intentionally NOT supported
+  in this pass — the model can save_recipe_to_book first if needed.
 
 ### 2.5 Settings & navigation
 
-- [ ] `set_user_settings(patch)` — theme, mode, density, font_pair,
-  radius, units, etc. (validated against the enum set).
-- [ ] `navigate(route)` — whitelisted routes only.
+- [x] `set_user_settings(patch)` — theme/mode/density/font_pair/radius/
+  card_style/sticker_rotate/dot_grid/units; reversible; client refreshes
+  the page after a successful change.
+- [x] `navigate(route)` — whitelisted via `AI_NAV_ROUTES` constant
+  (`/`, `/favorites`, `/pantry`, `/shopping`, `/plan`, `/chat`, `/add`).
 
 ### 2.6 Audit + undo
 
-- [ ] **Every commit returns an `undo_token`** stored in `ai_tool_audit`.
-- [ ] **New `undo(token)` tool** — reverses the last action when feasible
-  (favorite toggle, pantry stock, shopping check, plan day, etc.).
-- [ ] **Toast UI** in chat shows a 10-second "Undo" button.
+- [x] **Every tool call** lands in `ai_tool_audit` (id, user, conversation,
+  tool, input/result JSON, optional undo_token + undo_payload, ok flag,
+  reversed_at, created_at). Migration `002_ai_tool_audit.sql` is additive
+  (`CREATE TABLE IF NOT EXISTS`) and cPanel-safe.
+- [x] **New `undo(token)` tool** — reverses the last reversible action
+  (favorite toggle, pantry stock, shopping check, shopping remove, plan
+  day, plan swap, plan week clear, apply_week_plan, settings, pantry
+  update). Marks the audit row reversed so the same token can't be
+  replayed.
+- [x] **Inline 10-second Undo button** in the chat surface. Hits
+  `POST /api/ai/undo` directly so the user doesn't burn a model turn just
+  to reverse one click. Auto-disappears after 10s.
+
+**Acceptance:** "Switch me to dark mode and metric, then build a shopping
+list from this week's plan, then check off the eggs" — all via chat, with
+live UI updates and an undo path.
+
+**Phase 2 status (claude/sprout-ai-aware-cpanel-uztqc):** all six sections
+landed. 25 new tools registered (34 total). Migration 002 must be applied
+on existing installs; fresh installs pick it up via the updated
+`schema.sql`.
 
 **Acceptance:** "Switch me to dark mode and metric, then build a shopping
 list from this week's plan, then check off the eggs" — all via chat, with
