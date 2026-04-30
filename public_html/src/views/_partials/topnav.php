@@ -5,12 +5,12 @@
   <span class="nav-brand-glyph" aria-hidden="true">🥧</span>
   <span class="brand-text">my little cookbook</span>
   <button type="button" class="icon-btn" data-js="ai-fab-trigger" aria-label="AI assistant">✨</button>
-  <button type="button" class="icon-btn" data-js="drawer-open" aria-label="Open menu" aria-expanded="false">≡</button>
+  <button type="button" class="icon-btn" data-js="drawer-open" aria-label="Open menu" aria-controls="mobile-menu-drawer" aria-expanded="false">≡</button>
 </header>
 
 <!-- Mobile slide-in drawer (hidden on desktop) -->
-<div class="mobile-drawer no-print" data-js="drawer" aria-hidden="true">
-  <div class="mobile-drawer-panel" role="dialog" aria-label="Menu">
+<div id="mobile-menu-drawer" class="mobile-drawer no-print" data-js="drawer" aria-hidden="true">
+  <div class="mobile-drawer-panel" role="dialog" aria-modal="true" aria-label="Menu">
     <button type="button" class="mobile-drawer-close" data-js="drawer-close" aria-label="Close menu">✕</button>
     <a href="<?= h(url_for('/')) ?>"          <?= $active === 'browse'    ? 'aria-current="page"' : '' ?>>🏠 Browse</a>
     <a href="<?= h(url_for('/pantry')) ?>"    <?= $active === 'pantry'    ? 'aria-current="page"' : '' ?>>🥕 Pantry</a>
