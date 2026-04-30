@@ -438,17 +438,60 @@ function injectFab() {
 
 function wireDrawer() {
   const drawer = document.querySelector('[data-js="drawer"]');
+  const panel = drawer ? drawer.querySelector('.mobile-drawer-panel') : null;
   const open  = document.querySelector('[data-js="drawer-open"]');
   const close = document.querySelector('[data-js="drawer-close"]');
-  if (!drawer || !open) return;
+  if (!drawer || !panel || !open) return;
+
+  const focusableSelector = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  let lastFocused = null;
+
   const set = (v) => {
     drawer.dataset.open = v ? 'true' : 'false';
     drawer.setAttribute('aria-hidden', v ? 'false' : 'true');
     open.setAttribute('aria-expanded', v ? 'true' : 'false');
+    document.body.classList.toggle('drawer-open', v);
+
+    if (v) {
+      lastFocused = document.activeElement;
+      const first = panel.querySelector(focusableSelector);
+      if (first) first.focus();
+      return;
+    }
+    if (lastFocused && typeof lastFocused.focus === 'function') lastFocused.focus();
   };
+
   open.addEventListener('click', () => set(true));
   if (close) close.addEventListener('click', () => set(false));
+
   drawer.addEventListener('click', (e) => { if (e.target === drawer) set(false); });
+  panel.addEventListener('click', (e) => {
+    if (e.target.closest('a[href]')) set(false);
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (drawer.dataset.open !== 'true') return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      set(false);
+      return;
+    }
+    if (e.key !== 'Tab') return;
+
+    const nodes = Array.from(panel.querySelectorAll(focusableSelector));
+    if (!nodes.length) return;
+    const first = nodes[0];
+    const last = nodes[nodes.length - 1];
+    const active = document.activeElement;
+
+    if (e.shiftKey && active === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  });
 }
 
 function wireAiTriggers() {
