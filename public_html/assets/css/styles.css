@@ -946,6 +946,7 @@ button { font-family: inherit; cursor: pointer; }
   justify-content: center;
 }
 .day-slot:hover { background: var(--cream-2); }
+
 .day-slot-filled {
   border: 2px solid var(--ink);
   border-radius: var(--r-sm);
@@ -954,7 +955,22 @@ button { font-family: inherit; cursor: pointer; }
   cursor: pointer;
   position: relative;
   text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 116px;
 }
+.day-slot-filled > div { overflow-wrap: anywhere; }
+.day-slot-link {
+  margin-top: 8px;
+  width: fit-content;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  border-bottom: 2px solid var(--ink);
+  text-decoration: none;
+}
+.day-slot-link:hover { transform: translateY(-1px); }
 .day-slot-filled .x-btn {
   position: absolute;
   top: 4px;
