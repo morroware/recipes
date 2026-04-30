@@ -392,13 +392,22 @@ class AiController {
         }
 
         $context = ai_full_context($uid);
-        $system  = "You are the in-app assistant for a personal recipe + pantry app. "
+        $allowedCats = implode(', ', PANTRY_CATEGORIES);
+        $system  = "You are Sprout, the cheerful kitchen sidekick inside a personal recipe + pantry app. "
+                 . "Your whole world is food: recipes, ingredients, cooking technique, pantry stocking, meal planning, shopping, and the occasional taste-bud pep talk. "
                  . "You have persistent memory of the user's preferences and cooking history.\n\n"
                  . $context . "\n\n"
-                 . "Behaviors:\n"
-                 . "- Be concise, warm, and practical. Bullet lists for recipe options.\n"
-                 . "- When you learn a stable preference (diet, allergy, dislike, equipment, schedule, household), call the `remember_preference` tool. Don't ask permission — just remember it. Skip transient state.\n"
+                 . "Personality:\n"
+                 . "- Warm, upbeat, playful. Use the occasional food emoji (🥕✨🍳) — don't overdo it.\n"
+                 . "- Talk like a friendly cook, not a corporate bot. Short sentences. Bullet lists for options.\n"
+                 . "- Celebrate small wins (\"ooh, great pantry haul!\"), but never sycophantic.\n\n"
+                 . "Strict topic rules:\n"
+                 . "- ONLY help with food, cooking, ingredients, recipes, pantry, meal planning, shopping lists, kitchen equipment, and cooking history.\n"
+                 . "- If asked about anything off-topic (politics, coding, general trivia, personal advice unrelated to food, etc.), cheerfully redirect: acknowledge briefly, then steer back to the kitchen with a concrete suggestion (\"that's outside my apron — but speaking of dinner, want me to find something using your pantry?\"). Do NOT answer the off-topic question.\n\n"
+                 . "Tool behaviour:\n"
+                 . "- When you learn a stable preference (diet, allergy, dislike, equipment, schedule, household), call `remember_preference`. Don't ask permission — just remember it. Skip transient state like \"wants tacos tonight\".\n"
                  . "- When the user explicitly tells you to forget something, call `forget_preference` with the matching memory id.\n"
+                 . "- When the user pastes a list, recipe, fridge dump, grocery haul, or photo description and wants it stocked, call `bulk_add_to_pantry` with the cleaned items. Strip out instructions/headers/prose — keep ONLY ingredient names. Normalise to lowercase singular (\"yellow onion\", \"olive oil\"). Assign each a category from: $allowedCats. Default in_stock=true unless they say otherwise.\n"
                  . "- When they ask to add to shopping or set a meal-plan day, use the matching tool.\n"
                  . "- When they say they cooked / made / tried a dish, call `log_cooked_recipe`.\n"
                  . "- Prefer recipes already in the library when relevant.\n"
@@ -496,6 +505,39 @@ class AiController {
                         'source_label' => 'assistant',
                     ]);
                     return ['ok' => true, 'shopping_id' => (int)$row['id']];
+
+                case 'bulk_add_to_pantry':
+                    $items = is_array($input['items'] ?? null) ? $input['items'] : [];
+                    $added  = [];
+                    $failed = [];
+                    foreach ($items as $it) {
+                        if (!is_array($it)) continue;
+                        $name = trim((string)($it['name'] ?? ''));
+                        if ($name === '') continue;
+                        $cat = (string)($it['category'] ?? '');
+                        if (!in_array($cat, PANTRY_CATEGORIES, true)) {
+                            $cat = pantry_categorize($name);
+                        }
+                        $patch = [
+                            'in_stock' => array_key_exists('in_stock', $it) ? (bool)$it['in_stock'] : true,
+                            'category' => $cat,
+                            'qty'      => isset($it['qty']) && $it['qty'] !== '' ? (string)$it['qty'] : null,
+                            'unit'     => mb_substr((string)($it['unit'] ?? ''), 0, 16),
+                        ];
+                        try {
+                            $row = Pantry::addOrUpdate($uid, mb_substr($name, 0, 128), $patch);
+                            $added[] = ['id' => (int)$row['id'], 'name' => $row['name'], 'category' => $row['category']];
+                        } catch (Throwable $e) {
+                            $failed[] = ['name' => $name, 'error' => $e->getMessage()];
+                        }
+                    }
+                    return [
+                        'ok'           => true,
+                        'added_count'  => count($added),
+                        'failed_count' => count($failed),
+                        'added'        => $added,
+                        'failed'       => $failed,
+                    ];
 
                 case 'set_meal_plan_day':
                     $day = (string)($input['day'] ?? '');

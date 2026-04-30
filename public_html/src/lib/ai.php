@@ -292,6 +292,7 @@ function ai_full_context(int $user_id): string {
  * etc.). The controller is responsible for executing each tool_use block.
  */
 function ai_chat_tools(): array {
+    $allowedCats = PANTRY_CATEGORIES;
     return [
         [
             'name'        => 'remember_preference',
@@ -332,6 +333,31 @@ function ai_chat_tools(): array {
                     'unit' => ['type' => 'string', 'description' => 'Optional unit, e.g. "lb".'],
                 ],
                 'required' => ['name'],
+            ],
+        ],
+        [
+            'name'        => 'bulk_add_to_pantry',
+            'description' => 'Add many ingredients to the user\'s pantry at once. Use this whenever the user pastes a recipe, fridge dump, grocery haul, photo description, or any list of food items they want stocked. Strip out non-ingredient lines (instructions, headers, prose), normalise each name (lowercase, singular, e.g. "yellow onion", "olive oil"), and assign a category from the allowed set. Deduplicate.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'items' => [
+                        'type' => 'array',
+                        'minItems' => 1,
+                        'items' => [
+                            'type' => 'object',
+                            'properties' => [
+                                'name'     => ['type' => 'string', 'description' => 'Concise lowercase singular ingredient (e.g. "yellow onion").'],
+                                'qty'      => ['type' => ['string', 'null'], 'description' => 'Optional quantity as a string, e.g. "2" or "1.5".'],
+                                'unit'     => ['type' => 'string', 'description' => 'Optional unit, e.g. "lb", "cup". Empty string if none.'],
+                                'category' => ['type' => 'string', 'enum' => $allowedCats, 'description' => 'Pantry aisle/bucket.'],
+                                'in_stock' => ['type' => 'boolean', 'description' => 'true if the user has it on hand now (default true). Use false if they want it on the want-list.'],
+                            ],
+                            'required' => ['name', 'category'],
+                        ],
+                    ],
+                ],
+                'required' => ['items'],
             ],
         ],
         [

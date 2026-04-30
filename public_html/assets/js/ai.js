@@ -6,7 +6,20 @@ import { apiFetch, toast, appUrl } from './app.js';
 
 let aiEnabled = null;
 let panelEl = null;
-let chatConversationId = null;
+const CONV_STORAGE_KEY = 'recipes:ai:fab-conversation-id';
+let chatConversationId = (() => {
+  try {
+    const v = localStorage.getItem(CONV_STORAGE_KEY);
+    return v ? parseInt(v, 10) || null : null;
+  } catch { return null; }
+})();
+function setChatConversationId(id) {
+  chatConversationId = id || null;
+  try {
+    if (chatConversationId) localStorage.setItem(CONV_STORAGE_KEY, String(chatConversationId));
+    else localStorage.removeItem(CONV_STORAGE_KEY);
+  } catch {}
+}
 
 function pageContext() {
   const el = document.querySelector('[data-page]');
@@ -150,7 +163,7 @@ function wirePanel(panel) {
           page: pageContext(),
         }),
       });
-      chatConversationId = data.conversation_id || chatConversationId;
+      setChatConversationId(data.conversation_id || chatConversationId);
       busyEl.classList.remove('ai-busy');
       busyEl.textContent = data.reply || '(no reply)';
       if (Array.isArray(data.actions) && data.actions.length) {
@@ -283,10 +296,15 @@ async function bulkSubmit(panel, commit) {
 
 function describeAction(a) {
   const i = (a && a.input) || {};
+  const r = (a && a.result) || {};
   switch (a && a.tool) {
     case 'remember_preference':  return `🧠 saved: ${i.fact}`;
     case 'forget_preference':    return `🗑️ forgot #${i.id}`;
     case 'add_to_shopping_list': return `🛒 added: ${[i.qty, i.unit, i.name].filter(Boolean).join(' ')}`;
+    case 'bulk_add_to_pantry': {
+      const n = r.added_count ?? (i.items || []).length;
+      return `🥫 stocked pantry with ${n} item${n === 1 ? '' : 's'}`;
+    }
     case 'set_meal_plan_day':    return `📅 ${i.day}: recipe #${i.recipe_id}`;
     case 'log_cooked_recipe':    return `🍽️ logged: ${i.recipe_title}`;
     default: return `↺ ${a && a.tool}`;
@@ -325,6 +343,28 @@ export async function openPanel(initialTab = 'chat') {
     p.hidden = p.dataset.pane !== initialTab;
   });
   panel.hidden = false;
+  if (initialTab === 'chat') hydrateChatLog().catch(() => {});
+}
+
+let chatHydrated = false;
+async function hydrateChatLog() {
+  if (chatHydrated || !chatConversationId || !panelEl) return;
+  const log = panelEl.querySelector('[data-ai="chatlog"]');
+  if (!log || log.children.length) { chatHydrated = true; return; }
+  try {
+    const { data } = await apiFetch('/api/ai/conversations/' + chatConversationId);
+    const msgs = (data && data.messages) || [];
+    for (const m of msgs.slice(-12)) {
+      if (m.role === 'user' || m.role === 'assistant') {
+        appendChat(m.role, m.content);
+      }
+    }
+    chatHydrated = true;
+  } catch {
+    // Stale id — clear it so a new conversation starts fresh.
+    setChatConversationId(null);
+    chatHydrated = true;
+  }
 }
 
 function closePanel() {

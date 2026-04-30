@@ -208,10 +208,16 @@ async function init() {
 
   function describeAction(a) {
     const i = a?.input || {};
+    const r = a?.result || {};
     switch (a.tool) {
       case 'remember_preference':   return `🧠 Remembered: ${i.fact} [${i.category || 'other'}]`;
       case 'forget_preference':     return `🗑️ Forgot memory #${i.id}`;
       case 'add_to_shopping_list':  return `🛒 Added to shopping: ${[i.qty, i.unit, i.name].filter(Boolean).join(' ')}`;
+      case 'bulk_add_to_pantry': {
+        const n = r.added_count ?? (i.items || []).length;
+        const sample = (i.items || []).slice(0, 3).map(x => x.name).filter(Boolean).join(', ');
+        return `🥫 Added ${n} item${n === 1 ? '' : 's'} to pantry${sample ? ` — ${sample}${(i.items || []).length > 3 ? '…' : ''}` : ''}`;
+      }
       case 'set_meal_plan_day':     return `📅 ${i.day}: recipe #${i.recipe_id}`;
       case 'log_cooked_recipe':     return `🍽️ Logged cook: ${i.recipe_title}` + (i.rating ? ` (${'★'.repeat(i.rating)})` : '');
       default: return `↺ ${a.tool}`;
