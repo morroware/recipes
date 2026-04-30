@@ -411,9 +411,11 @@ class AiController {
                  . "- When they ask to add to shopping or set a meal-plan day, use the matching tool.\n"
                  . "- When they say they cooked / made / tried a dish, call `log_cooked_recipe`.\n"
                  . "- Prefer recipes already in the library when relevant.\n"
+                 . "- You also have a `web_search` tool. Use it when the user asks for new recipe ideas to expand beyond their library, when their pantry has unusual ingredients you don't recognise, or when they ask for something specific (\"a real Cantonese congee recipe\"). Search for credible recipe sources (food blogs, cooking sites). Summarise the top 2–4 hits as a friendly bullet list with title, source name, time, and one-line why-it-fits — include the URL each time. Never fabricate a recipe and pretend you found it online.\n"
+                 . "- When the user picks one of your web search results to keep: (1) compose a complete structured recipe (title, cuisine, summary, time_minutes, servings, difficulty, glyph emoji, color from mint|butter|peach|lilac|sky|blush|lime|coral, tags, ingredients with qty/unit/name/aisle, ordered steps) faithfully reflecting the source. (2) Call `save_recipe_to_book` with confirm=false to preview. (3) After the user explicitly says yes, call again with the SAME recipe and confirm=true. Always include `source_url` so they can revisit the original.\n"
                  . ($page ? "- The user is on the '$page' page; gear advice toward that view.\n" : '');
 
-        $tools = ai_chat_tools();
+        $tools = array_merge(ai_chat_tools(), [ai_web_search_tool()]);
 
         // Tool-use loop. Allow up to 4 hops so the model can save a memory,
         // add a shopping item, etc., before producing the final reply.
@@ -567,6 +569,53 @@ class AiController {
                     if (!$r) return ['ok' => false, 'error' => 'recipe_not_found'];
                     Plan::setDay($uid, $day, $rid);
                     return ['ok' => true, 'day' => $day, 'recipe_id' => $rid];
+
+                case 'save_recipe_to_book':
+                    $recipe  = is_array($input['recipe'] ?? null) ? $input['recipe'] : [];
+                    $source  = trim((string)($input['source_url'] ?? ''));
+                    $confirm = !empty($input['confirm']);
+                    $title = trim((string)($recipe['title'] ?? ''));
+                    $ings  = is_array($recipe['ingredients'] ?? null) ? $recipe['ingredients'] : [];
+                    $steps = is_array($recipe['steps'] ?? null) ? $recipe['steps'] : [];
+                    if ($title === '' || !$ings || !$steps) {
+                        return ['ok' => false, 'error' => 'recipe_incomplete', 'note' => 'Need title, ingredients, and steps.'];
+                    }
+                    $preview = [
+                        'title'        => $title,
+                        'cuisine'      => (string)($recipe['cuisine'] ?? ''),
+                        'time_minutes' => (int)($recipe['time_minutes'] ?? 30),
+                        'servings'     => (int)($recipe['servings'] ?? 2),
+                        'difficulty'   => (string)($recipe['difficulty'] ?? 'Easy'),
+                        'glyph'        => (string)($recipe['glyph'] ?? '🍽️'),
+                        'ingredient_count' => count($ings),
+                        'step_count'       => count($steps),
+                        'source_url'   => $source,
+                    ];
+                    if (!$confirm) {
+                        return [
+                            'ok'      => true,
+                            'preview' => true,
+                            'recipe'  => $preview,
+                            'note'    => 'Preview only — nothing was saved. Show the user this summary and ask them to confirm before calling again with confirm=true.',
+                        ];
+                    }
+                    $payload = $recipe;
+                    if ($source !== '') {
+                        $existing = isset($payload['notes']) ? (string)$payload['notes'] : '';
+                        $payload['notes'] = trim($existing . ($existing ? "\n\n" : '') . 'Source: ' . $source);
+                    }
+                    try {
+                        $rid = Recipe::create($uid, $payload);
+                    } catch (Throwable $e) {
+                        return ['ok' => false, 'error' => 'save_failed', 'message' => $e->getMessage()];
+                    }
+                    return [
+                        'ok'         => true,
+                        'committed'  => true,
+                        'recipe_id'  => $rid,
+                        'title'      => $title,
+                        'view_url'   => url_for('/recipes/' . $rid),
+                    ];
 
                 case 'log_cooked_recipe':
                     $row = CookingLog::add(

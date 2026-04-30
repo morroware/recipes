@@ -310,6 +310,11 @@ function describeAction(a) {
       return `🥫 stocked pantry with ${n} item${n === 1 ? '' : 's'}`;
     }
     case 'set_meal_plan_day':    return `📅 ${i.day}: recipe #${i.recipe_id}`;
+    case 'save_recipe_to_book': {
+      const t = (i.recipe && i.recipe.title) || (r.title || 'recipe');
+      if (r.preview) return `👀 previewed recipe "${t}" — awaiting your OK`;
+      return `📚 saved "${t}" to your book`;
+    }
     case 'log_cooked_recipe':    return `🍽️ logged: ${i.recipe_title}`;
     default: return `↺ ${a && a.tool}`;
   }
