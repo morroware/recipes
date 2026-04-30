@@ -167,6 +167,7 @@ async function init() {
         <p>Start a conversation. Try one of these:</p>
         <div class="chat-suggestions">
           <button class="filter-chip" type="button" data-chat-prompt="What can I make tonight from what I have?">What can I make tonight?</button>
+          <button class="filter-chip" type="button" data-chat-prompt="Look at my pantry, then search the web for 3 fresh recipe ideas that use what I have. Show me each option with its source link before saving anything.">🌐 Find new recipes online</button>
           <button class="filter-chip" type="button" data-chat-prompt="Stock my pantry from this paste:&#10;&#10;">🥫 Stock my pantry from this paste</button>
           <button class="filter-chip" type="button" data-chat-prompt="I'm vegetarian and don't like cilantro. Remember that.">I'm vegetarian (remember this)</button>
           <button class="filter-chip" type="button" data-chat-prompt="Plan a balanced 7-day meal plan for me.">Plan my week</button>
@@ -200,7 +201,15 @@ async function init() {
       const li = document.createElement('li');
       const ok = a?.result?.ok !== false;
       li.className = ok ? 'ok' : 'err';
-      li.textContent = describeAction(a);
+      if (a?.tool === 'save_recipe_to_book' && a?.result?.committed && a?.result?.view_url) {
+        const title = a.input?.recipe?.title || a.result.title || 'recipe';
+        const link = document.createElement('a');
+        link.href = a.result.view_url;
+        link.textContent = `Open "${title}"`;
+        li.append(`📚 Saved to your book — `, link);
+      } else {
+        li.textContent = describeAction(a);
+      }
       ul.appendChild(li);
     }
     els.log.appendChild(ul);
@@ -226,6 +235,12 @@ async function init() {
         return `🥫 Added ${n} item${n === 1 ? '' : 's'} to pantry${tail}`;
       }
       case 'set_meal_plan_day':     return `📅 ${i.day}: recipe #${i.recipe_id}`;
+      case 'save_recipe_to_book': {
+        const t = i.recipe?.title || r.title || 'recipe';
+        if (r.preview) return `👀 Previewed recipe "${t}" (waiting for your OK)`;
+        const link = r.view_url ? ` — open: ${r.view_url}` : '';
+        return `📚 Saved "${t}" to your book${link}`;
+      }
       case 'log_cooked_recipe':     return `🍽️ Logged cook: ${i.recipe_title}` + (i.rating ? ` (${'★'.repeat(i.rating)})` : '');
       default: return `↺ ${a.tool}`;
     }

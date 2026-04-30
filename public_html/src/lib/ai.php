@@ -287,6 +287,19 @@ function ai_full_context(int $user_id): string {
 }
 
 /**
+ * Anthropic server-side web_search tool definition. The model executes
+ * searches transparently — results come back in the same response, no
+ * client-side handling needed.
+ */
+function ai_web_search_tool(int $maxUses = 4): array {
+    return [
+        'type'     => 'web_search_20250305',
+        'name'     => 'web_search',
+        'max_uses' => $maxUses,
+    ];
+}
+
+/**
  * Tool definitions advertised to the chat model so it can take real actions
  * during a conversation (save a memory, add to shopping list, log a cook,
  * etc.). The controller is responsible for executing each tool_use block.
@@ -371,6 +384,48 @@ function ai_chat_tools(): array {
                     'recipe_id' => ['type' => 'integer'],
                 ],
                 'required' => ['day', 'recipe_id'],
+            ],
+        ],
+        [
+            'name'        => 'save_recipe_to_book',
+            'description' => 'Save a complete recipe to the user\'s personal recipe book. Use this AFTER the user agrees to add a recipe you\'ve discovered (e.g. via web_search). Always call once with confirm=false to show the user a clean preview, then again with confirm=true ONLY after they say yes. Provide the FULL structured recipe — do not leave fields blank.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'recipe' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'title'        => ['type' => 'string'],
+                            'cuisine'      => ['type' => 'string'],
+                            'summary'      => ['type' => 'string', 'description' => 'One-line tagline.'],
+                            'time_minutes' => ['type' => 'integer', 'minimum' => 1],
+                            'servings'     => ['type' => 'integer', 'minimum' => 1],
+                            'difficulty'   => ['type' => 'string', 'enum' => ['Easy', 'Medium', 'Hard']],
+                            'glyph'        => ['type' => 'string', 'description' => 'A single emoji that fits the dish.'],
+                            'color'        => ['type' => 'string', 'enum' => ['mint','butter','peach','lilac','sky','blush','lime','coral']],
+                            'tags'         => ['type' => 'array', 'items' => ['type' => 'string']],
+                            'ingredients'  => [
+                                'type' => 'array',
+                                'minItems' => 1,
+                                'items' => [
+                                    'type' => 'object',
+                                    'properties' => [
+                                        'qty'   => ['type' => ['string', 'null']],
+                                        'unit'  => ['type' => 'string'],
+                                        'name'  => ['type' => 'string'],
+                                        'aisle' => ['type' => 'string'],
+                                    ],
+                                    'required' => ['name'],
+                                ],
+                            ],
+                            'steps' => ['type' => 'array', 'minItems' => 1, 'items' => ['type' => 'string']],
+                        ],
+                        'required' => ['title', 'ingredients', 'steps'],
+                    ],
+                    'source_url' => ['type' => 'string', 'description' => 'Where the recipe was discovered (web URL, blog, etc.). Stored in the recipe notes.'],
+                    'confirm'    => ['type' => 'boolean', 'description' => 'false = preview only. true = actually save. Default false.'],
+                ],
+                'required' => ['recipe'],
             ],
         ],
         [
