@@ -6,7 +6,7 @@ import { apiFetch, toast } from './app.js';
 
 const STYLE = `
 .tweaks-fab {
-  position: fixed; right: 16px; bottom: 16px; z-index: 9999;
+  position: fixed; right: 24px; bottom: 94px; z-index: 9999;
   width: 44px; height: 44px; border-radius: 50%;
   border: 2px solid var(--ink); background: var(--cream);
   box-shadow: 3px 3px 0 var(--ink); cursor: pointer;
@@ -14,10 +14,13 @@ const STYLE = `
 }
 .tweaks-fab:hover { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 var(--ink); }
 .tweaks-fab.active { background: var(--butter); }
+@media (max-width: 720px) {
+  .tweaks-fab { bottom: 152px; }
+}
 
 .tweaks-panel {
-  position: fixed; right: 16px; bottom: 72px; z-index: 9998;
-  width: 300px; max-height: calc(100vh - 100px);
+  position: fixed; right: 16px; bottom: 150px; z-index: 9998;
+  width: 300px; max-height: calc(100vh - 170px);
   display: flex; flex-direction: column;
   background: var(--cream); color: var(--ink);
   border: 2px solid var(--ink); border-radius: var(--r-md);
