@@ -407,7 +407,7 @@ class AiController {
                  . "Tool behaviour:\n"
                  . "- When you learn a stable preference (diet, allergy, dislike, equipment, schedule, household), call `remember_preference`. Don't ask permission — just remember it. Skip transient state like \"wants tacos tonight\".\n"
                  . "- When the user explicitly tells you to forget something, call `forget_preference` with the matching memory id.\n"
-                 . "- When the user pastes a list, recipe, fridge dump, grocery haul, or photo description and wants it stocked, call `bulk_add_to_pantry` with the cleaned items. Strip out instructions/headers/prose — keep ONLY ingredient names. Normalise to lowercase singular (\"yellow onion\", \"olive oil\"). Assign each a category from: $allowedCats. Default in_stock=true unless they say otherwise.\n"
+                 . "- When the user pastes a list, recipe, fridge dump, grocery haul, or photo description and wants it stocked: (1) call `bulk_add_to_pantry` with confirm=false to preview the cleaned items. Strip out instructions/headers/prose — keep ONLY ingredient names. Normalise to lowercase singular (\"yellow onion\", \"olive oil\"). Assign each a category from: $allowedCats. Default in_stock=true unless they say otherwise. (2) Show the user the parsed list as a friendly bullet list and ask them to confirm (\"want me to add these? 🥕\"). (3) ONLY after they say yes, call the tool again with the SAME items and confirm=true. If they want to tweak the list first, parse their edits and re-preview before committing.\n"
                  . "- When they ask to add to shopping or set a meal-plan day, use the matching tool.\n"
                  . "- When they say they cooked / made / tried a dish, call `log_cooked_recipe`.\n"
                  . "- Prefer recipes already in the library when relevant.\n"
@@ -507,9 +507,9 @@ class AiController {
                     return ['ok' => true, 'shopping_id' => (int)$row['id']];
 
                 case 'bulk_add_to_pantry':
-                    $items = is_array($input['items'] ?? null) ? $input['items'] : [];
-                    $added  = [];
-                    $failed = [];
+                    $items   = is_array($input['items'] ?? null) ? $input['items'] : [];
+                    $confirm = !empty($input['confirm']);
+                    $clean = [];
                     foreach ($items as $it) {
                         if (!is_array($it)) continue;
                         $name = trim((string)($it['name'] ?? ''));
@@ -518,21 +518,41 @@ class AiController {
                         if (!in_array($cat, PANTRY_CATEGORIES, true)) {
                             $cat = pantry_categorize($name);
                         }
-                        $patch = [
-                            'in_stock' => array_key_exists('in_stock', $it) ? (bool)$it['in_stock'] : true,
-                            'category' => $cat,
+                        $clean[] = [
+                            'name'     => mb_substr($name, 0, 128),
                             'qty'      => isset($it['qty']) && $it['qty'] !== '' ? (string)$it['qty'] : null,
                             'unit'     => mb_substr((string)($it['unit'] ?? ''), 0, 16),
+                            'category' => $cat,
+                            'in_stock' => array_key_exists('in_stock', $it) ? (bool)$it['in_stock'] : true,
                         ];
+                    }
+                    if (!$confirm) {
+                        return [
+                            'ok'           => true,
+                            'preview'      => true,
+                            'preview_count'=> count($clean),
+                            'items'        => $clean,
+                            'note'         => 'Preview only — nothing was written. Show the user the parsed list and ask them to confirm before calling this tool again with confirm=true.',
+                        ];
+                    }
+                    $added  = [];
+                    $failed = [];
+                    foreach ($clean as $it) {
                         try {
-                            $row = Pantry::addOrUpdate($uid, mb_substr($name, 0, 128), $patch);
+                            $row = Pantry::addOrUpdate($uid, $it['name'], [
+                                'in_stock' => $it['in_stock'],
+                                'category' => $it['category'],
+                                'qty'      => $it['qty'],
+                                'unit'     => $it['unit'],
+                            ]);
                             $added[] = ['id' => (int)$row['id'], 'name' => $row['name'], 'category' => $row['category']];
                         } catch (Throwable $e) {
-                            $failed[] = ['name' => $name, 'error' => $e->getMessage()];
+                            $failed[] = ['name' => $it['name'], 'error' => $e->getMessage()];
                         }
                     }
                     return [
                         'ok'           => true,
+                        'committed'    => true,
                         'added_count'  => count($added),
                         'failed_count' => count($failed),
                         'added'        => $added,

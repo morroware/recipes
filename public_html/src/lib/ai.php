@@ -337,7 +337,7 @@ function ai_chat_tools(): array {
         ],
         [
             'name'        => 'bulk_add_to_pantry',
-            'description' => 'Add many ingredients to the user\'s pantry at once. Use this whenever the user pastes a recipe, fridge dump, grocery haul, photo description, or any list of food items they want stocked. Strip out non-ingredient lines (instructions, headers, prose), normalise each name (lowercase, singular, e.g. "yellow onion", "olive oil"), and assign a category from the allowed set. Deduplicate.',
+            'description' => 'Add many ingredients to the user\'s pantry at once. Use this whenever the user pastes a recipe, fridge dump, grocery haul, photo description, or any list of food items they want stocked. Strip out non-ingredient lines (instructions, headers, prose), normalise each name (lowercase, singular, e.g. "yellow onion", "olive oil"), and assign a category from the allowed set. Deduplicate. ALWAYS call once with confirm=false first to return a preview to the user, then call again with the same items and confirm=true ONLY after the user explicitly says yes.',
             'input_schema' => [
                 'type'       => 'object',
                 'properties' => [
@@ -356,6 +356,7 @@ function ai_chat_tools(): array {
                             'required' => ['name', 'category'],
                         ],
                     ],
+                    'confirm' => ['type' => 'boolean', 'description' => 'false = preview only (return parsed list, write nothing). true = actually write to pantry. Default false.'],
                 ],
                 'required' => ['items'],
             ],

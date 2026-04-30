@@ -302,6 +302,10 @@ function describeAction(a) {
     case 'forget_preference':    return `🗑️ forgot #${i.id}`;
     case 'add_to_shopping_list': return `🛒 added: ${[i.qty, i.unit, i.name].filter(Boolean).join(' ')}`;
     case 'bulk_add_to_pantry': {
+      if (r.preview) {
+        const n = r.preview_count ?? (i.items || []).length;
+        return `👀 previewed ${n} item${n === 1 ? '' : 's'} — awaiting your OK`;
+      }
       const n = r.added_count ?? (i.items || []).length;
       return `🥫 stocked pantry with ${n} item${n === 1 ? '' : 's'}`;
     }

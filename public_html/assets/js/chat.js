@@ -167,6 +167,7 @@ async function init() {
         <p>Start a conversation. Try one of these:</p>
         <div class="chat-suggestions">
           <button class="filter-chip" type="button" data-chat-prompt="What can I make tonight from what I have?">What can I make tonight?</button>
+          <button class="filter-chip" type="button" data-chat-prompt="Stock my pantry from this paste:&#10;&#10;">🥫 Stock my pantry from this paste</button>
           <button class="filter-chip" type="button" data-chat-prompt="I'm vegetarian and don't like cilantro. Remember that.">I'm vegetarian (remember this)</button>
           <button class="filter-chip" type="button" data-chat-prompt="Plan a balanced 7-day meal plan for me.">Plan my week</button>
           <button class="filter-chip" type="button" data-chat-prompt="Suggest a comfort food recipe similar to the ones I've rated highest.">Comfort food I'd love</button>
@@ -214,9 +215,15 @@ async function init() {
       case 'forget_preference':     return `🗑️ Forgot memory #${i.id}`;
       case 'add_to_shopping_list':  return `🛒 Added to shopping: ${[i.qty, i.unit, i.name].filter(Boolean).join(' ')}`;
       case 'bulk_add_to_pantry': {
-        const n = r.added_count ?? (i.items || []).length;
-        const sample = (i.items || []).slice(0, 3).map(x => x.name).filter(Boolean).join(', ');
-        return `🥫 Added ${n} item${n === 1 ? '' : 's'} to pantry${sample ? ` — ${sample}${(i.items || []).length > 3 ? '…' : ''}` : ''}`;
+        const items = i.items || [];
+        const sample = items.slice(0, 3).map(x => x.name).filter(Boolean).join(', ');
+        const tail = sample ? ` — ${sample}${items.length > 3 ? '…' : ''}` : '';
+        if (r.preview) {
+          const n = r.preview_count ?? items.length;
+          return `👀 Previewed ${n} pantry item${n === 1 ? '' : 's'} (waiting for your OK)${tail}`;
+        }
+        const n = r.added_count ?? items.length;
+        return `🥫 Added ${n} item${n === 1 ? '' : 's'} to pantry${tail}`;
       }
       case 'set_meal_plan_day':     return `📅 ${i.day}: recipe #${i.recipe_id}`;
       case 'log_cooked_recipe':     return `🍽️ Logged cook: ${i.recipe_title}` + (i.rating ? ` (${'★'.repeat(i.rating)})` : '');
