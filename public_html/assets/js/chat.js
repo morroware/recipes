@@ -2,9 +2,11 @@
 // Dedicated /chat page: persistent conversations, memory editor, tool actions.
 
 import { apiFetch, toast, appUrl } from './app.js';
+import { getWindowContext, setWindowContext } from './window-context.js';
 
 const root = document.querySelector('[data-page="chat"]');
 if (root) {
+  setWindowContext({ page: 'chat' });
   init().catch(err => console.error('chat init failed', err));
 }
 
@@ -257,6 +259,7 @@ async function init() {
         body: JSON.stringify({
           conversation_id: state.conversationId,
           message,
+          window_context: getWindowContext(),
         }),
       });
       busy.remove();

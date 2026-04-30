@@ -5,7 +5,7 @@
 /** @var array $times */
 /** @var array $opts */
 ?>
-<div class="page">
+<div class="page" data-page="recipes-index">
   <div class="hero">
     <div class="hero-stickers">
       <div class="hero-sticker" style="top: 20%; right: 8%; background: #FFE9A8; transform: rotate(-12deg);">🍋</div>

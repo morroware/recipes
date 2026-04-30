@@ -186,20 +186,18 @@ function ai_kitchen_context(int $user_id): string {
         $recipes = [];
     }
     $lines[] = '';
-    $lines[] = 'Existing recipe library (' . count($recipes) . '):';
-    foreach (array_slice($recipes, 0, 40) as $r) {
-        $tags = isset($r['tags']) && is_array($r['tags']) ? implode(',', $r['tags']) : '';
-        $lines[] = sprintf(
-            '  - %s (%s, %dm, %s)%s',
-            $r['title'],
-            $r['cuisine'] ?: 'no cuisine',
-            (int)$r['time_minutes'],
-            $r['difficulty'],
-            $tags ? ' #' . $tags : ''
-        );
+    // Titles only — the model has a `recipe_search` tool to fetch any one of
+    // these in full on demand. Keeps the cached system prompt cheap.
+    $lines[] = 'Recipe library (' . count($recipes) . ' saved — call `recipe_search` for full bodies):';
+    $titles = [];
+    foreach ($recipes as $r) {
+        $titles[] = (string)$r['title'];
     }
-    if (count($recipes) > 40) {
-        $lines[] = '  …and ' . (count($recipes) - 40) . ' more.';
+    foreach (array_slice($titles, 0, 80) as $t) {
+        $lines[] = '  - ' . $t;
+    }
+    if (count($titles) > 80) {
+        $lines[] = '  …and ' . (count($titles) - 80) . ' more (use `recipe_search` to find any of them).';
     }
     return implode("\n", $lines);
 }
@@ -287,6 +285,235 @@ function ai_full_context(int $user_id): string {
 }
 
 /**
+ * Normalise the per-page `window_context` payload sent by the client.
+ * Filters out unsafe shapes; keeps only fields we actively use.
+ *
+ * @param mixed $raw  whatever arrived in the request body
+ * @return array{
+ *   page:string, recipe_id:?int, selection_text:string,
+ *   filters:array<string,mixed>, visible_ids:int[]
+ * }
+ */
+function ai_normalize_window_context($raw): array {
+    $allowedPages = [
+        'recipes-index', 'recipes-show', 'recipes-edit', 'recipes-new',
+        'recipes-favorites', 'pantry', 'plan', 'shopping', 'chat',
+        'favorites', 'add', '',
+    ];
+    $page = '';
+    $recipeId = null;
+    $selection = '';
+    $filters = [];
+    $visible = [];
+
+    if (is_array($raw)) {
+        $p = (string)($raw['page'] ?? '');
+        if (in_array($p, $allowedPages, true)) $page = $p;
+
+        if (isset($raw['recipe_id']) && $raw['recipe_id'] !== '' && $raw['recipe_id'] !== null) {
+            $recipeId = (int)$raw['recipe_id'];
+            if ($recipeId <= 0) $recipeId = null;
+        }
+
+        $sel = (string)($raw['selection_text'] ?? '');
+        if ($sel !== '') {
+            $selection = mb_substr(trim($sel), 0, 800);
+        }
+
+        if (isset($raw['filters']) && is_array($raw['filters'])) {
+            foreach ($raw['filters'] as $k => $v) {
+                if (!is_string($k) || $k === '') continue;
+                if (mb_strlen($k) > 32) continue;
+                if (is_scalar($v)) {
+                    $filters[$k] = mb_substr((string)$v, 0, 128);
+                } elseif (is_array($v)) {
+                    $compact = [];
+                    foreach (array_slice($v, 0, 14, true) as $vk => $vv) {
+                        if (is_scalar($vv)) {
+                            $compact[(string)$vk] = mb_substr((string)$vv, 0, 64);
+                        }
+                    }
+                    if ($compact) $filters[$k] = $compact;
+                }
+            }
+        }
+
+        if (isset($raw['visible_ids']) && is_array($raw['visible_ids'])) {
+            foreach (array_slice($raw['visible_ids'], 0, 20) as $id) {
+                $n = (int)$id;
+                if ($n > 0 && !in_array($n, $visible, true)) $visible[] = $n;
+            }
+        }
+    }
+
+    return [
+        'page'           => $page,
+        'recipe_id'      => $recipeId,
+        'selection_text' => $selection,
+        'filters'        => $filters,
+        'visible_ids'    => $visible,
+    ];
+}
+
+/**
+ * Re-fetch authoritative data from the DB for whatever the client says it's
+ * showing, then build a `# Current view` system block. The model never sees
+ * the raw client payload — it sees what the server confirmed exists.
+ *
+ * IDs in `visible_ids` are filtered to ones owned by $user_id; recipe_id is
+ * loaded with full body (ingredients + steps) when present.
+ */
+function ai_view_context(int $user_id, array $ctx): string {
+    if ($ctx['page'] === '' && $ctx['recipe_id'] === null
+        && !$ctx['filters'] && !$ctx['visible_ids']
+        && $ctx['selection_text'] === '') {
+        return '';
+    }
+
+    $lines = ['# Current view'];
+    if ($ctx['page'] !== '') {
+        $lines[] = '- Page: ' . $ctx['page'];
+    }
+
+    $filterBits = [];
+    foreach ($ctx['filters'] as $k => $v) {
+        if (is_array($v)) {
+            $inner = [];
+            foreach ($v as $vk => $vv) {
+                $inner[] = $vk . '=' . $vv;
+            }
+            if ($inner) $filterBits[] = $k . '={' . implode(', ', $inner) . '}';
+        } else {
+            $filterBits[] = $k . '=' . $v;
+        }
+    }
+    if ($filterBits) {
+        $lines[] = '- Filters / view state: ' . implode('; ', $filterBits);
+    }
+
+    if ($ctx['selection_text'] !== '') {
+        $sel = $ctx['selection_text'];
+        $lines[] = '- User has the following text selected on the page:';
+        $lines[] = '  <selection>' . $sel . '</selection>';
+    }
+
+    if ($ctx['recipe_id'] !== null) {
+        try {
+            $recipe = Recipe::findFull($user_id, $ctx['recipe_id']);
+        } catch (Throwable $e) {
+            $recipe = null;
+        }
+        if ($recipe) {
+            $lines[] = '- Currently viewing recipe #' . (int)$recipe['id'] . ': "' . $recipe['title'] . '"';
+            $meta = [];
+            if (!empty($recipe['cuisine']))  $meta[] = $recipe['cuisine'];
+            if (!empty($recipe['time_minutes'])) $meta[] = (int)$recipe['time_minutes'] . 'm';
+            if (!empty($recipe['servings'])) $meta[] = 'serves ' . (int)$recipe['servings'];
+            if (!empty($recipe['difficulty'])) $meta[] = $recipe['difficulty'];
+            if ($meta) $lines[] = '  meta: ' . implode(' · ', $meta);
+            if (!empty($recipe['summary'])) {
+                $lines[] = '  summary: ' . mb_substr((string)$recipe['summary'], 0, 240);
+            }
+            if (!empty($recipe['ingredients'])) {
+                $lines[] = '  ingredients:';
+                foreach ($recipe['ingredients'] as $ing) {
+                    $qty  = isset($ing['qty']) && $ing['qty'] !== null ? rtrim(rtrim((string)$ing['qty'], '0'), '.') : '';
+                    $unit = (string)($ing['unit'] ?? '');
+                    $name = (string)($ing['name'] ?? '');
+                    $bits = array_filter([$qty, $unit, $name], fn($s) => $s !== '');
+                    if ($bits) $lines[] = '    - ' . implode(' ', $bits);
+                }
+            }
+            if (!empty($recipe['steps'])) {
+                $lines[] = '  steps:';
+                foreach ($recipe['steps'] as $i => $s) {
+                    $text = is_array($s) ? (string)($s['text'] ?? '') : (string)$s;
+                    $lines[] = '    ' . ($i + 1) . '. ' . mb_substr($text, 0, 320);
+                }
+            }
+            if (!empty($recipe['notes'])) {
+                $lines[] = '  user notes: ' . mb_substr((string)$recipe['notes'], 0, 240);
+            }
+        }
+    }
+
+    if (($ctx['page'] === 'shopping')) {
+        try {
+            $items = Shopping::listForUser($user_id);
+        } catch (Throwable $e) {
+            $items = [];
+        }
+        if ($items) {
+            $lines[] = '- Shopping list (' . count($items) . ' items):';
+            foreach (array_slice($items, 0, 40) as $it) {
+                $check = ((int)($it['checked'] ?? 0) === 1) ? '[x]' : '[ ]';
+                $qty = isset($it['qty']) && $it['qty'] !== null ? rtrim(rtrim((string)$it['qty'], '0'), '.') : '';
+                $unit = (string)($it['unit'] ?? '');
+                $name = (string)($it['name'] ?? '');
+                $src  = (string)($it['source_label'] ?? '');
+                $bits = array_filter([$qty, $unit, $name], fn($s) => $s !== '');
+                $line = '  ' . $check . ' ' . implode(' ', $bits);
+                if ($src !== '' && $src !== 'manual') $line .= ' (from ' . $src . ')';
+                $lines[] = $line;
+            }
+            if (count($items) > 40) {
+                $lines[] = '  …and ' . (count($items) - 40) . ' more.';
+            }
+        }
+    }
+
+    if ($ctx['page'] === 'plan') {
+        try {
+            $byDay = Plan::forUser($user_id);
+        } catch (Throwable $e) {
+            $byDay = [];
+        }
+        $planLines = [];
+        foreach ($byDay as $day => $entry) {
+            if ($entry) {
+                $planLines[] = $day . ': ' . $entry['title'] . ' (#' . (int)$entry['id'] . ')';
+            } else {
+                $planLines[] = $day . ': (empty)';
+            }
+        }
+        if ($planLines) {
+            $lines[] = '- This week\'s plan:';
+            foreach ($planLines as $l) $lines[] = '  ' . $l;
+        }
+    }
+
+    if ($ctx['visible_ids'] && $ctx['recipe_id'] === null
+        && !in_array($ctx['page'], ['plan', 'shopping'], true)) {
+        // Re-fetch each id and confirm ownership before naming them to the model.
+        $ids = $ctx['visible_ids'];
+        $pdo = db();
+        $place = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $pdo->prepare(
+            "SELECT id, title, cuisine, time_minutes, difficulty
+               FROM recipes
+              WHERE user_id = ? AND id IN ($place)
+              ORDER BY FIELD(id, $place)"
+        );
+        $params = array_merge([$user_id], $ids, $ids);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll();
+        if ($rows) {
+            $lines[] = '- Recipes currently visible on the page (' . count($rows) . '):';
+            foreach ($rows as $r) {
+                $lines[] = sprintf(
+                    '  - #%d %s (%s, %dm, %s)',
+                    (int)$r['id'], $r['title'],
+                    $r['cuisine'] ?: 'no cuisine',
+                    (int)$r['time_minutes'], $r['difficulty']
+                );
+            }
+        }
+    }
+
+    return count($lines) > 1 ? implode("\n", $lines) : '';
+}
+
+/**
  * Anthropic server-side web_search tool definition. The model executes
  * searches transparently — results come back in the same response, no
  * client-side handling needed.
@@ -307,6 +534,33 @@ function ai_web_search_tool(int $maxUses = 4): array {
 function ai_chat_tools(): array {
     $allowedCats = PANTRY_CATEGORIES;
     return [
+        [
+            'name'        => 'recipe_search',
+            'description' => 'Search the user\'s saved recipe book by free-text query (matches title, cuisine, summary, ingredient names, step text, and notes). Use this whenever the user mentions a saved recipe by partial name or by a remembered ingredient ("that pasta with capers", "my chickpea curry"). Returns up to 8 hits with full bodies (ingredients + steps), so you don\'t need to call recipe_get for those. Prefer this over guessing from the title-only library list.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'query'   => ['type' => 'string', 'description' => 'Free-text query. Empty string = list any recipes matching the optional filters.'],
+                    'cuisine' => ['type' => 'string', 'description' => 'Optional cuisine filter (exact match), e.g. "Italian", "Thai". Omit or use "" to skip.'],
+                    'tag'     => ['type' => 'string', 'description' => 'Optional tag filter (exact), e.g. "weeknight". Omit or use "" to skip.'],
+                    'time'    => ['type' => 'string', 'enum' => ['', '< 30 min', '30–60 min', '> 60 min'], 'description' => 'Optional total-time bucket.'],
+                    'favorites_only' => ['type' => 'boolean', 'description' => 'If true, only return ♥-marked recipes.'],
+                    'limit'   => ['type' => 'integer', 'minimum' => 1, 'maximum' => 20, 'description' => 'Max hits to return (default 8).'],
+                ],
+                'required' => ['query'],
+            ],
+        ],
+        [
+            'name'        => 'recipe_get',
+            'description' => 'Fetch one of the user\'s saved recipes by id, with full body (ingredients + steps + tags + notes). Use when the user references a recipe id you already know (e.g. from the # Current view block or a prior recipe_search hit) and you need the full body to act on it.',
+            'input_schema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'id' => ['type' => 'integer', 'description' => 'recipes.id'],
+                ],
+                'required' => ['id'],
+            ],
+        ],
         [
             'name'        => 'remember_preference',
             'description' => 'Save a stable fact about the user so it influences future suggestions. Use for dietary needs, allergies, dislikes, favorite cuisines, equipment, household size, skill, goals, etc. Do NOT save transient state like "wants tacos tonight".',

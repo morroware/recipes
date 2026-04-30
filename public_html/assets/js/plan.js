@@ -4,12 +4,31 @@
 
 import { apiFetch, toast, appUrl } from './app.js';
 import { RecipePicker } from './recipe-picker.js';
+import { setWindowContext } from './window-context.js';
 
 const page = document.querySelector('[data-page="plan"]');
 if (page) {
   // Read recipes JSON injected by the view.
   const dataNode = document.querySelector('script[data-bind="plan-recipes"]');
   const recipes = dataNode ? JSON.parse(dataNode.textContent || '[]') : [];
+
+  // Publish the current week's assigned recipe ids (one per day, in order).
+  const planIds = [];
+  const planByDay = {};
+  page.querySelectorAll('.day-slot-link').forEach((a) => {
+    const m = (a.getAttribute('href') || '').match(/\/recipes\/(\d+)/);
+    if (m) {
+      const id = parseInt(m[1], 10);
+      if (id) planIds.push(id);
+      const col = a.closest('[data-day]');
+      if (col && id) planByDay[col.dataset.day] = id;
+    }
+  });
+  setWindowContext({
+    page: 'plan',
+    visible_ids: planIds,
+    filters: { plan_by_day: planByDay },
+  });
 
   const overlay   = page.querySelector('[data-js="picker-overlay"]');
   const dayLabel  = page.querySelector('[data-js="picker-day"]');

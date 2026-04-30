@@ -3,6 +3,7 @@
 // suggestions + recipe import. The full chat experience lives at /chat.
 
 import { apiFetch, toast, appUrl } from './app.js';
+import { getWindowContext } from './window-context.js';
 
 let aiEnabled = null;
 let panelEl = null;
@@ -19,11 +20,6 @@ function setChatConversationId(id) {
     if (chatConversationId) localStorage.setItem(CONV_STORAGE_KEY, String(chatConversationId));
     else localStorage.removeItem(CONV_STORAGE_KEY);
   } catch {}
-}
-
-function pageContext() {
-  const el = document.querySelector('[data-page]');
-  return el ? el.getAttribute('data-page') : '';
 }
 
 async function ensureStatus() {
@@ -160,7 +156,7 @@ function wirePanel(panel) {
         body: JSON.stringify({
           conversation_id: chatConversationId,
           message: text,
-          page: pageContext(),
+          window_context: getWindowContext(),
         }),
       });
       setChatConversationId(data.conversation_id || chatConversationId);

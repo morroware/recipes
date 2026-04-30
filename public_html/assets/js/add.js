@@ -3,11 +3,16 @@
 // step editors, color/difficulty pickers, debounced save status.
 
 import { apiFetch, toast, appUrl } from './app.js';
+import { setWindowContext } from './window-context.js';
 
 const page = document.querySelector('[data-page="add"]');
 if (page) {
   const mode     = page.dataset.mode;          // 'create' | 'edit'
   const recipeId = parseInt(page.dataset.recipeId || '0', 10);
+  setWindowContext({
+    page: mode === 'edit' ? 'recipes-edit' : 'recipes-new',
+    recipe_id: recipeId || null,
+  });
   const form     = page.querySelector('[data-js="recipe-form"]');
   const ingList  = page.querySelector('[data-js="ingredients"]');
   const stepList = page.querySelector('[data-js="steps"]');

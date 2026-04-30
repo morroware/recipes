@@ -3,9 +3,12 @@
 // 🥕 Stock pantry (move checked → pantry), print.
 
 import { apiFetch, toast } from './app.js';
+import { setWindowContext } from './window-context.js';
 
 const page = document.querySelector('[data-page="shopping"]');
 if (page) {
+  setWindowContext({ page: 'shopping' });
+
   const list      = page.querySelector('[data-js="list"]');
   const stockBtn  = page.querySelector('[data-js="stock-pantry"]');
   const stockN    = page.querySelector('[data-js="stock-count"]');

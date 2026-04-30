@@ -365,7 +365,13 @@ class AiController {
 
         $body = self::readJson();
         $message = trim((string)($body['message'] ?? ''));
-        $page    = (string)($body['page'] ?? '');
+        // Accept the new structured `window_context` object; fall back to the
+        // old plain `page` string so existing clients keep working.
+        $rawCtx = $body['window_context'] ?? null;
+        if (!is_array($rawCtx) && isset($body['page'])) {
+            $rawCtx = ['page' => (string)$body['page']];
+        }
+        $windowCtx = ai_normalize_window_context($rawCtx);
         $convId  = isset($body['conversation_id']) && $body['conversation_id'] !== ''
             ? (int)$body['conversation_id'] : null;
         if ($message === '') json_err('message_required', 422);
@@ -392,8 +398,13 @@ class AiController {
         }
 
         $context = ai_full_context($uid);
+        $viewBlock = ai_view_context($uid, $windowCtx);
         $allowedCats = implode(', ', PANTRY_CATEGORIES);
-        $system  = "You are Sprout, the cheerful kitchen sidekick inside a personal recipe + pantry app. "
+
+        // Stable system prompt — same across most turns in a session, so the
+        // ephemeral cache hits cheaply. The per-turn `# Current view` block is
+        // sent as a separate, uncached system block below.
+        $stableSystem = "You are Sprout, the cheerful kitchen sidekick inside a personal recipe + pantry app. "
                  . "Your whole world is food: recipes, ingredients, cooking technique, pantry stocking, meal planning, shopping, and the occasional taste-bud pep talk. "
                  . "You have persistent memory of the user's preferences and cooking history.\n\n"
                  . $context . "\n\n"
@@ -407,13 +418,22 @@ class AiController {
                  . "Tool behaviour:\n"
                  . "- When you learn a stable preference (diet, allergy, dislike, equipment, schedule, household), call `remember_preference`. Don't ask permission — just remember it. Skip transient state like \"wants tacos tonight\".\n"
                  . "- When the user explicitly tells you to forget something, call `forget_preference` with the matching memory id.\n"
+                 . "- When the user mentions a saved recipe by partial name or describes one (\"my chickpea curry\", \"that pasta with capers\"), call `recipe_search` to find it. The library list above only has titles — `recipe_search` returns full bodies (ingredients + steps). Use `recipe_get` if you already have the id.\n"
                  . "- When the user pastes a list, recipe, fridge dump, grocery haul, or photo description and wants it stocked: (1) call `bulk_add_to_pantry` with confirm=false to preview the cleaned items. Strip out instructions/headers/prose — keep ONLY ingredient names. Normalise to lowercase singular (\"yellow onion\", \"olive oil\"). Assign each a category from: $allowedCats. Default in_stock=true unless they say otherwise. (2) Show the user the parsed list as a friendly bullet list and ask them to confirm (\"want me to add these? 🥕\"). (3) ONLY after they say yes, call the tool again with the SAME items and confirm=true. If they want to tweak the list first, parse their edits and re-preview before committing.\n"
                  . "- When they ask to add to shopping or set a meal-plan day, use the matching tool.\n"
                  . "- When they say they cooked / made / tried a dish, call `log_cooked_recipe`.\n"
                  . "- Prefer recipes already in the library when relevant.\n"
                  . "- You also have a `web_search` tool. Use it when the user asks for new recipe ideas to expand beyond their library, when their pantry has unusual ingredients you don't recognise, or when they ask for something specific (\"a real Cantonese congee recipe\"). Search for credible recipe sources (food blogs, cooking sites). Summarise the top 2–4 hits as a friendly bullet list with title, source name, time, and one-line why-it-fits — include the URL each time. Never fabricate a recipe and pretend you found it online.\n"
                  . "- When the user picks one of your web search results to keep: (1) compose a complete structured recipe (title, cuisine, summary, time_minutes, servings, difficulty, glyph emoji, color from mint|butter|peach|lilac|sky|blush|lime|coral, tags, ingredients with qty/unit/name/aisle, ordered steps) faithfully reflecting the source. (2) Call `save_recipe_to_book` with confirm=false to preview. (3) After the user explicitly says yes, call again with the SAME recipe and confirm=true. Always include `source_url` so they can revisit the original.\n"
-                 . ($page ? "- The user is on the '$page' page; gear advice toward that view.\n" : '');
+                 . "- A separate `# Current view` system block (when present) shows exactly what the user is looking at right now (page, current recipe, visible items, selected text). Treat it as ground truth: when they say \"this recipe\", \"these items\", \"halve it\", \"organise this list\", use that block as the antecedent. Don't ask them to repeat what's already on screen.\n";
+
+        $systemBlocks = [
+            ['type' => 'text', 'text' => $stableSystem, 'cache_control' => ['type' => 'ephemeral']],
+        ];
+        if ($viewBlock !== '') {
+            // Volatile per-turn context — intentionally NOT cached.
+            $systemBlocks[] = ['type' => 'text', 'text' => $viewBlock];
+        }
 
         $tools = array_merge(ai_chat_tools(), [ai_web_search_tool()]);
 
@@ -426,7 +446,7 @@ class AiController {
         for ($hop = 0; $hop < 5; $hop++) {
             try {
                 $resp = ai_call($apiMessages, [
-                    'system' => $system,
+                    'system' => $systemBlocks,
                     'tools'  => $tools,
                     'max_tokens' => 1400,
                     'temperature' => 0.6,
@@ -483,6 +503,28 @@ class AiController {
     private function executeTool(int $uid, string $name, array $input): array {
         try {
             switch ($name) {
+                case 'recipe_search':
+                    $query = trim((string)($input['query'] ?? ''));
+                    $filters = [];
+                    if (!empty($input['cuisine'])) $filters['cuisine'] = (string)$input['cuisine'];
+                    if (!empty($input['tag']))     $filters['tag']     = (string)$input['tag'];
+                    if (!empty($input['time']))    $filters['time']    = (string)$input['time'];
+                    if (!empty($input['favorites_only'])) $filters['favorites_only'] = true;
+                    $limit = isset($input['limit']) ? (int)$input['limit'] : 8;
+                    $hits = Recipe::search($uid, $query, $filters, $limit);
+                    $shaped = [];
+                    foreach ($hits as $r) {
+                        $shaped[] = self::shapeRecipeForModel($r);
+                    }
+                    return ['ok' => true, 'count' => count($shaped), 'recipes' => $shaped];
+
+                case 'recipe_get':
+                    $rid = (int)($input['id'] ?? 0);
+                    if ($rid <= 0) return ['ok' => false, 'error' => 'bad_id'];
+                    $r = Recipe::findFull($uid, $rid);
+                    if (!$r) return ['ok' => false, 'error' => 'recipe_not_found'];
+                    return ['ok' => true, 'recipe' => self::shapeRecipeForModel($r)];
+
                 case 'remember_preference':
                     $row = Memory::add(
                         $uid,
@@ -784,5 +826,37 @@ class AiController {
         if (!$raw) return [];
         $data = json_decode($raw, true);
         return is_array($data) ? $data : [];
+    }
+
+    /** Trim a Recipe::findFull row down to the fields useful in tool responses. */
+    private static function shapeRecipeForModel(array $r): array {
+        $ings = [];
+        foreach ($r['ingredients'] ?? [] as $ing) {
+            $ings[] = [
+                'qty'   => isset($ing['qty']) && $ing['qty'] !== null ? rtrim(rtrim((string)$ing['qty'], '0'), '.') : null,
+                'unit'  => (string)($ing['unit'] ?? ''),
+                'name'  => (string)($ing['name'] ?? ''),
+                'aisle' => (string)($ing['aisle'] ?? ''),
+            ];
+        }
+        $steps = [];
+        foreach ($r['steps'] ?? [] as $s) {
+            $steps[] = is_array($s) ? (string)($s['text'] ?? '') : (string)$s;
+        }
+        return [
+            'id'           => (int)$r['id'],
+            'title'        => (string)$r['title'],
+            'cuisine'      => (string)($r['cuisine'] ?? ''),
+            'summary'      => (string)($r['summary'] ?? ''),
+            'time_minutes' => (int)($r['time_minutes'] ?? 0),
+            'servings'     => (int)($r['servings'] ?? 0),
+            'difficulty'   => (string)($r['difficulty'] ?? ''),
+            'glyph'        => (string)($r['glyph'] ?? ''),
+            'tags'         => array_values($r['tags'] ?? []),
+            'is_favorite'  => !empty($r['is_favorite']),
+            'ingredients'  => $ings,
+            'steps'        => $steps,
+            'notes'        => (string)($r['notes'] ?? ''),
+        ];
     }
 }

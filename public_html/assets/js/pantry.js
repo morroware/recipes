@@ -7,9 +7,12 @@
 // re-implementing client-side state.
 
 import { apiFetch, toast } from './app.js';
+import { setWindowContext } from './window-context.js';
 
 const page = document.querySelector('[data-page="pantry"]');
 if (page) {
+  setWindowContext({ page: 'pantry' });
+
   // ---- Add new item -------------------------------------------------------
   const addForm = page.querySelector('[data-js="pantry-add"]');
   if (addForm) {
