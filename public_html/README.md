@@ -1,104 +1,124 @@
-# Personal Recipe Book — cPanel deploy
+# Personal Recipe Book (public_html)
 
-Vanilla PHP + MySQL, no build step. Drop `public_html/` onto a shared cPanel
-host and run the installer.
+A no-build, shared-host-friendly recipe manager built with **vanilla PHP + MySQL + plain JS/CSS**.
+This app is designed for cPanel-style deployments where `public_html/` is the web root.
 
-## Prerequisites
+## What the app does
 
-- PHP **8.1+** (cPanel → "Select PHP Version" if you need to change it)
-- MySQL **8.0+** or MariaDB **10.6+**
-- Apache with `mod_rewrite` enabled (the default on cPanel)
+- Browse recipe cards with search, cuisine filters, favorites, and quick metadata.
+- Add, edit, and delete recipes with structured ingredients/steps and private notes.
+- Pantry tracking with in-stock toggles and restock suggestions.
+- Weekly meal planning with a recipe picker modal per day.
+- Build a shopping list from planned meals.
+- Printable recipe card layout.
+- Lightweight AI-assisted flows (chat + plan/import helpers) when configured.
+- Theme/density/radius/font tweaks and responsive layouts.
 
-## Deploy steps
+## Tech stack
 
-1. **Create a MySQL DB** in cPanel → *MySQL Databases*.
-   - Make a new database, e.g. `cpaneluser_recipes`
-   - Make a new DB user, e.g. `cpaneluser_recipes`
-   - Add the user to the database with **All Privileges**
-   - Note the host (almost always `localhost`)
+- **Backend:** PHP 8.1+, PDO, MySQL/MariaDB
+- **Frontend:** Server-rendered PHP views + vanilla ES modules
+- **Styling:** Single global stylesheet + component stylesheet for recipe picker
+- **Routing:** Front controller (`index.php`) with path dispatch
 
-2. **Upload this folder** so the contents of `public_html/` end up at the
-   document root of your domain (or addon-domain). Easiest path: zip up
-   `public_html/`, upload via cPanel → File Manager, extract in place.
+No Node/npm, bundler, or build pipeline is required.
 
-3. **Visit `/install.php`** in your browser. Provide:
-   - the DB credentials from step 1
-   - an admin email + password (this is the single login)
+## Directory map
 
-   The installer creates the schema, seeds 12 recipes + 30 pantry staples,
-   writes `config.php`, and self-locks.
-
-4. **Delete `install.php`** from the server (the lockfile already prevents it
-   from running again, but removing the file is belt-and-braces).
-
-5. Visit `/` — you should see the cookbook home page.
-
-## Layout
-
-```
+```text
 public_html/
-  .htaccess        ← rewrites everything to index.php
-  index.php        ← front controller / router
-  install.php      ← run-once installer (delete after install)
-  config.php       ← written by installer; never commit this
-  assets/{css,js,img}
-  src/             ← protected by Deny-all .htaccess
-    lib/           controllers/  models/  views/
-  db/              ← protected by Deny-all .htaccess
-    schema.sql  seeds.sql  install.lock
+  index.php                   # Front controller + route dispatch
+  install.php                 # One-time installer
+  config.php                  # Generated at install time (not committed)
+
+  assets/
+    css/
+      styles.css              # Global UI system / responsive styles
+      recipe-picker.css       # Picker component styles
+    js/
+      app.js                  # Shared client utilities
+      *.js                    # Page-specific modules (plan, add, pantry, shopping...)
+    img/uploads/              # Optional local image uploads
+
+  src/
+    controllers/              # Request handlers for pages + API
+    models/                   # Data access/query logic
+    views/                    # PHP templates and partials
+    lib/                      # Utilities (db/auth/csrf/response/view helpers)
+
+  db/
+    schema.sql                # Base schema
+    seeds.sql                 # Initial recipes + pantry staples
+    migrations/               # Incremental SQL migrations
 ```
 
-`/src` and `/db` sit inside `public_html/` for easy upload, but their own
-`.htaccess` files block all HTTP access. PHP still reads them through the
-filesystem.
+## Local/dev quick start
 
-## Reinstalling
+1. Create a MySQL database/user.
+2. Copy `public_html/config.example.php` to `public_html/config.php` and fill credentials.
+3. Import schema + seed data:
+   - `public_html/db/schema.sql`
+   - `public_html/db/seeds.sql`
+4. Serve `public_html/` with PHP (or your Apache vhost docroot).
+5. Open `/` in browser and log in with your seeded/admin credentials.
 
-Delete `public_html/config.php` and `public_html/db/install.lock`, then
-re-upload `install.php` and visit it again.
+For hosted installs, use `install.php` instead.
 
-## Verifying a deployment
+## cPanel deployment (recommended)
 
-For the full step-by-step (zip, upload, install, verify, troubleshoot), see
-[`docs/DEPLOYMENT.md`](../docs/DEPLOYMENT.md) at repo root.
+1. Create DB + DB user in cPanel and grant all privileges.
+2. Upload/extract this `public_html/` contents into site docroot.
+3. Open `/install.php`, enter DB + admin credentials, and finish install.
+4. Delete `install.php` after successful setup.
 
-Four tools live in the sibling `tools/` directory (one level above
-`public_html/`). They are CLI-only and never web-accessible. Run them over
-SSH on the cPanel host after install:
+## API + behavior overview
 
-1. **Stack audit** — fails the build if the deploy tree picked up a banned
-   framework, a build-tool config, or a transpiled source extension. No PHP
-   needed.
-   ```
-   bash tools/stack_audit.sh
-   ```
+The app mixes server-rendered pages and JSON APIs:
 
-2. **DB validation** — confirms schema + seeds applied cleanly: 12 recipes,
-   30+ pantry staples, every recipe has ingredients/steps, indexes exist, no
-   orphan rows. Reads `public_html/config.php` automatically.
-   ```
-   php tools/db_validate.php
-   ```
+- Page endpoints render via `src/views/*`.
+- Interactive UI actions use `fetch` to `/api/*` routes.
+- CSRF protection is enforced for state-changing API requests.
 
-3. **Perf check** — EXPLAINs the hot SQL queries (recipe list, pantry
-   in-stock keys, ingredient bulk fetch, shopping list, meal plan…) against
-   the live DB and flags full table scans (`type=ALL`). Read-only.
-   ```
-   php tools/perf_check.php
-   ```
+Main interactive modules:
 
-4. **HTTP smoke test** — logs in as the admin user via cURL and walks every
-   JSON endpoint (settings, pantry CRUD + restock, suggestions, ingredient
-   search, shopping CRUD, plan, favorite toggle, CSRF rejection). Self-cleans;
-   leaves DB state unchanged. Requires the PHP `curl` extension.
-   ```
-   php tools/smoke.php https://yourdomain.com admin@example.com 'p4ssword'
-   ```
+- `assets/js/browse.js`: search/filter/favorite behaviors.
+- `assets/js/add.js`: dynamic ingredient/step editor + save/delete.
+- `assets/js/plan.js`: day picker modal, clear day/week, build shopping list.
+- `assets/js/pantry.js`: pantry toggles and suggestion actions.
+- `assets/js/shopping.js`: shopping list CRUD interactions.
 
-All four exit 0 on success and non-zero with a list of failures otherwise,
-so they slot straight into a post-deploy script.
+## Built-in validation/check tools (repo root)
 
-`GET /healthz` (no auth) is a public probe that returns the app version
-(`APP_VERSION` from `src/lib/version.php`), the install timestamp, and the
-running PHP version — handy for monitoring or for confirming what's live
-after a re-upload.
+Run from repo root after setup:
+
+- `bash tools/stack_audit.sh`
+- `php tools/db_validate.php`
+- `php tools/perf_check.php`
+- `php tools/smoke.php https://yourdomain.example admin@example.com 'password'`
+
+## Current UI status notes
+
+Recent UI fixes include:
+
+- Meal plan cards now use valid interactive markup (no nested button-in-link conflict).
+- Meal plan cards now preserve layout better for long recipe titles/metadata.
+- Added an explicit “Open recipe” action in planned day cards for clearer affordance.
+
+## Security/ops notes
+
+- Keep `config.php` out of version control.
+- Delete `install.php` once installation is complete.
+- `src/` and `db/` are intended to be HTTP-blocked via `.htaccess`.
+- Use HTTPS in production and strong admin credentials.
+
+## Troubleshooting
+
+- Blank/500 page: verify PHP version/extensions and DB credentials in `config.php`.
+- API errors in UI: inspect browser console/network and server PHP error log.
+- Missing assets/styles: confirm document root points to this `public_html/`.
+- Installer lock issues: remove `db/install.lock` only when intentionally reinstalling.
+
+## License / usage
+
+Internal project scaffold for personal/home recipe management.
+Adjust branding, copy, and data for your own deployment.
