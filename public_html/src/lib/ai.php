@@ -555,6 +555,80 @@ function ai_view_context(int $user_id, array $ctx): string {
 }
 
 /**
+ * Format / vocabulary cheat-sheet built from the live constants so the chat
+ * model knows the exact enums it will need when composing tool inputs.
+ *
+ * Lives in the cached system prompt — generating it from the constants
+ * (rather than hand-typing the lists in the prompt) means it can't drift
+ * when an enum is extended in PHP.
+ */
+function ai_format_reference(): string {
+    $aisles  = implode(' | ', array_map(fn($s) => '"' . $s . '"', AISLES));
+    $cats    = implode(' | ', array_map(fn($s) => '"' . $s . '"', PANTRY_CATEGORIES));
+    $colors  = '"mint" | "butter" | "peach" | "lilac" | "sky" | "blush" | "lime" | "coral"';
+    $diff    = '"Easy" | "Medium" | "Hard"';
+    $days    = implode(' | ', array_map(fn($s) => '"' . $s . '"', PLAN_DAYS));
+    $mcats   = implode(' | ', array_map(fn($s) => '"' . $s . '"', Memory::CATEGORIES));
+    $routes  = implode(' | ', array_map(fn($s) => '"' . $s . '"', AI_NAV_ROUTES));
+    $timeBuckets = '"< 30 min" | "30–60 min" | "> 60 min" (note the en-dash, not a hyphen, in the middle bucket)';
+
+    return implode("\n", [
+        '# Format reference (use these EXACT enum values when calling tools)',
+        '',
+        'Recipe object — save_recipe_to_book / update_recipe / parse helpers all use this shape:',
+        '  title         : string, ≤ 160 chars',
+        '  cuisine       : short string (e.g. "Italian", "Thai") or "" if unknown',
+        '  summary       : one-line tagline, ≤ 200 chars',
+        '  time_minutes  : integer, total active+waiting; default 30 if unsure',
+        '  servings      : integer ≥ 1; default 2 if unsure',
+        '  difficulty    : ' . $diff,
+        '  glyph         : exactly ONE emoji that fits the dish (🍝 🥘 🌮 …)',
+        '  color         : ' . $colors,
+        '  tags          : array of short lowercase words (e.g. ["weeknight","pasta"])',
+        '  ingredients   : array of {qty: string|null, unit: string, name: string, aisle: AISLE}',
+        '  steps         : ordered array of strings — one method step each',
+        '',
+        'AISLE (for ingredient.aisle, shopping_organize_by_aisle): ' . $aisles . '.',
+        'PANTRY CATEGORY (for bulk_add_to_pantry, pantry_update.category): ' . $cats . '.',
+        '  Note: AISLE and PANTRY CATEGORY share most values but the order differs and they are NOT interchangeable; pick the right enum for the field.',
+        '',
+        'Pantry item — bulk_add_to_pantry items[] entries:',
+        '  name      : lowercase singular noun ("yellow onion", "olive oil", "cumin"). NOT "Yellow Onions".',
+        '  qty       : optional string ("2", "1.5") or null',
+        '  unit      : optional short string ("lb", "cup", "tbsp") or ""',
+        '  category  : one of PANTRY CATEGORY above',
+        '  in_stock  : boolean (default true)',
+        '',
+        'DAY (set_meal_plan_day, plan_clear_day, plan_swap_days, apply_week_plan keys): canonical ' . $days . '.',
+        '  The server normalises "Monday"/"monday"/"Mondays"/"MON" too, but prefer the canonical form.',
+        '',
+        'MEMORY CATEGORY (remember_preference.category, extract output): ' . $mcats . '.',
+        '  weight: integer 1–10. 8–10 = hard constraints (allergies, strict diet); 4–7 = preference; 1–3 = mild.',
+        '',
+        'USER SETTINGS patch (set_user_settings.patch — every key independently optional):',
+        '  density        : "compact" | "cozy" | "airy"',
+        '  theme          : "rainbow" | "sunset" | "ocean" | "garden"',
+        '  mode           : "light" | "dark"',
+        '  font_pair      : "default" | "serif" | "mono" | "rounded"',
+        '  radius         : "sharp" | "default" | "round"',
+        '  card_style     : "mix" | "photo-only" | "glyph-only"',
+        '  sticker_rotate : boolean',
+        '  dot_grid       : boolean',
+        '  units          : "metric" | "imperial"',
+        '',
+        'NAV ROUTE (navigate.route, whitelist): ' . $routes . '.',
+        '',
+        'TIME BUCKET (recipe_search.time): ' . $timeBuckets . '.',
+        'RATING (log_cooked_recipe.rating): integer 1–5.',
+        '',
+        'ID conventions:',
+        '- Every recipe / pantry item / shopping item / memory has a numeric id.',
+        '- The "# Current view" block prefixes ids with "#" (e.g. "#42 [x] 2 cups flour"). Use the bare integer (42) when calling tools.',
+        '- Never invent ids — only use ids that appeared in this conversation (view block, kitchen context, prior tool result).',
+    ]);
+}
+
+/**
  * Anthropic server-side web_search tool definition. The model executes
  * searches transparently — results come back in the same response, no
  * client-side handling needed.
