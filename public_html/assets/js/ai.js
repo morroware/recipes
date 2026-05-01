@@ -163,12 +163,7 @@ function wirePanel(panel) {
       busyEl.classList.remove('ai-busy');
       busyEl.textContent = data.reply || '(no reply)';
       if (Array.isArray(data.actions) && data.actions.length) {
-        const note = document.createElement('div');
-        note.className = 'ai-chat-actions';
-        note.textContent = data.actions.map(a => describeAction(a)).join(' · ');
-        const log = panelEl.querySelector('[data-ai="chatlog"]');
-        log.appendChild(note);
-        log.scrollTop = log.scrollHeight;
+        renderActions(panelEl.querySelector('[data-ai="chatlog"]'), data.actions);
         applySideEffects(data.actions);
       }
     } catch (e) {
@@ -180,7 +175,20 @@ function wirePanel(panel) {
 
   // Bulk pantry
   panel.querySelector('[data-ai="bulk-preview"]').addEventListener('click', () => bulkSubmit(panel, false));
-  panel.querySelector('[data-ai="bulk-commit"]').addEventListener('click', () => bulkSubmit(panel, true));
+  panel.querySelector('[data-ai="bulk-commit"]').addEventListener('click', () => {
+    // If a preview is already on screen, commit those exact items (no
+    // re-parse). Otherwise, parse + commit in one shot.
+    if (panel._bulkPreviewItems && panel._bulkPreviewItems.length) {
+      bulkCommitParsed(panel, panel._bulkPreviewItems);
+    } else {
+      bulkSubmit(panel, true);
+    }
+  });
+  // If the user edits the textarea after a preview, drop the cached items so
+  // the next "Add all" re-parses the new text rather than committing stale.
+  panel.querySelector('[data-ai="bulk-text"]').addEventListener('input', () => {
+    panel._bulkPreviewItems = null;
+  });
 
   // Suggest
   panel.querySelector('[data-ai="suggest-go"]').addEventListener('click', async () => {
@@ -269,6 +277,7 @@ async function bulkSubmit(panel, commit) {
   const inStock = panel.querySelector('[data-ai="bulk-instock"]').checked;
   if (!text) { out.textContent = 'Paste a list first.'; return; }
   out.innerHTML = '<span class="ai-busy">parsing…</span>';
+  panel._bulkPreviewItems = null;
   try {
     const { data } = await apiFetch('/api/ai/parse-ingredients', {
       method: 'POST',
@@ -276,19 +285,182 @@ async function bulkSubmit(panel, commit) {
     });
     const items = data.items || [];
     if (!items.length) { out.textContent = 'No ingredients found.'; return; }
-    const lines = items.map(i =>
-      `• ${i.qty ?? ''} ${i.unit ?? ''} ${i.name} — ${i.category}`.replace(/\s+/g, ' ').trim()
-    );
-    out.textContent = (commit
-      ? `Added ${data.added.length} of ${items.length}:\n`
-      : `Preview (${items.length}):\n`) + lines.join('\n');
-    if (commit && data.added.length > 0 && document.querySelector('[data-page="pantry"]')) {
-      // refresh pantry view
-      setTimeout(() => window.location.reload(), 600);
+    if (commit) {
+      out.innerHTML = '';
+      out.appendChild(renderBulkResult(data.added || [], items));
+      if ((data.added || []).length > 0 && document.querySelector('[data-page="pantry"]')) {
+        setTimeout(() => window.location.reload(), 600);
+      }
+    } else {
+      // Stash the parsed items so the Add button commits this exact list
+      // (no second AI parse, no model drift).
+      panel._bulkPreviewItems = items.map(i => ({
+        name: i.name, qty: i.qty ?? null, unit: i.unit || '',
+        category: i.category, in_stock: inStock,
+      }));
+      out.innerHTML = '';
+      out.appendChild(renderBulkPreview(panel, panel._bulkPreviewItems));
     }
   } catch (e) {
     out.textContent = 'Error: ' + e.message;
   }
+}
+
+function renderBulkPreview(panel, items) {
+  const wrap = document.createElement('div');
+  wrap.className = 'ai-bulk-preview';
+  const head = document.createElement('div');
+  head.className = 'ai-bulk-preview-head';
+  head.innerHTML = `<strong>Preview (${items.length})</strong> · click ✕ to drop, then "Add all" commits the rest.`;
+  wrap.appendChild(head);
+  const ul = document.createElement('ul');
+  ul.className = 'ai-bulk-preview-list';
+  items.forEach((it, idx) => {
+    const li = document.createElement('li');
+    li.className = 'ai-bulk-preview-item';
+    li.dataset.idx = String(idx);
+    const qty = (it.qty != null ? String(it.qty) : '').trim();
+    const unit = (it.unit || '').trim();
+    const meta = [qty, unit].filter(Boolean).join(' ');
+    li.innerHTML = `
+      <span class="ai-bulk-preview-cat" title="${escapeHtml(it.category || 'Other')}"></span>
+      <span class="ai-bulk-preview-name"></span>
+      ${meta ? `<span class="ai-bulk-preview-qty"></span>` : ''}
+      <button type="button" class="icon-btn" data-ai-bulk-drop aria-label="Drop">✕</button>
+    `;
+    li.querySelector('.ai-bulk-preview-cat').textContent = it.category || 'Other';
+    li.querySelector('.ai-bulk-preview-name').textContent = it.name;
+    if (meta) li.querySelector('.ai-bulk-preview-qty').textContent = meta;
+    li.querySelector('[data-ai-bulk-drop]').addEventListener('click', () => {
+      const i = parseInt(li.dataset.idx, 10);
+      panel._bulkPreviewItems.splice(i, 1);
+      // Rerender so indexes stay sane.
+      const out = panel.querySelector('[data-ai="bulk-output"]');
+      out.innerHTML = '';
+      if (panel._bulkPreviewItems.length) {
+        out.appendChild(renderBulkPreview(panel, panel._bulkPreviewItems));
+      } else {
+        out.textContent = 'Preview is empty.';
+      }
+    });
+    ul.appendChild(li);
+  });
+  wrap.appendChild(ul);
+  return wrap;
+}
+
+function renderBulkResult(added, items) {
+  const wrap = document.createElement('div');
+  wrap.className = 'ai-bulk-result';
+  const head = document.createElement('div');
+  head.className = 'ai-bulk-preview-head';
+  head.innerHTML = `<strong>Added ${added.length} of ${items.length}</strong> 🥕`;
+  wrap.appendChild(head);
+  const ul = document.createElement('ul');
+  ul.className = 'ai-bulk-preview-list';
+  for (const it of items) {
+    const li = document.createElement('li');
+    li.className = 'ai-bulk-preview-item';
+    const qty = (it.qty != null ? String(it.qty) : '').trim();
+    const unit = (it.unit || '').trim();
+    const meta = [qty, unit].filter(Boolean).join(' ');
+    li.innerHTML = `
+      <span class="ai-bulk-preview-cat"></span>
+      <span class="ai-bulk-preview-name"></span>
+      ${meta ? '<span class="ai-bulk-preview-qty"></span>' : ''}
+    `;
+    li.querySelector('.ai-bulk-preview-cat').textContent = it.category || 'Other';
+    li.querySelector('.ai-bulk-preview-name').textContent = it.name;
+    if (meta) li.querySelector('.ai-bulk-preview-qty').textContent = meta;
+    ul.appendChild(li);
+  }
+  wrap.appendChild(ul);
+  return wrap;
+}
+
+async function bulkCommitParsed(panel, items) {
+  const out = panel.querySelector('[data-ai="bulk-output"]');
+  if (!items.length) { out.textContent = 'Nothing to add.'; return; }
+  out.innerHTML = '<span class="ai-busy">adding…</span>';
+  const added = [];
+  const failed = [];
+  // Fire writes sequentially so cPanel + MySQL don't see a thundering herd.
+  for (const it of items) {
+    try {
+      const { data } = await apiFetch('/api/pantry', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: it.name,
+          qty: it.qty,
+          unit: it.unit,
+          category: it.category,
+          in_stock: !!it.in_stock,
+        }),
+      });
+      added.push(data?.item || { name: it.name });
+    } catch (e) {
+      failed.push({ name: it.name, error: e?.message || 'failed' });
+    }
+  }
+  out.innerHTML = '';
+  out.appendChild(renderBulkResult(added, items));
+  panel._bulkPreviewItems = null;
+  if (added.length > 0 && document.querySelector('[data-page="pantry"]')) {
+    setTimeout(() => window.location.reload(), 600);
+  }
+  if (failed.length) {
+    toast(`Couldn't add ${failed.length} item${failed.length === 1 ? '' : 's'}`, 'error');
+  } else if (added.length) {
+    toast(`🥕 Added ${added.length} to pantry`);
+  }
+}
+
+function renderActions(log, actions) {
+  if (!log || !actions || !actions.length) return;
+  const ul = document.createElement('ul');
+  ul.className = 'ai-chat-actions-list';
+  for (const a of actions) {
+    const li = document.createElement('li');
+    const ok = a?.result?.ok !== false;
+    li.className = 'ai-chat-action ' + (ok ? 'ok' : 'err');
+    li.textContent = describeAction(a);
+
+    if (ok && a?.result?.undo_token) {
+      const undoBtn = document.createElement('button');
+      undoBtn.type = 'button';
+      undoBtn.className = 'btn btn-sm chat-undo-btn';
+      undoBtn.style.marginLeft = '8px';
+      const token = String(a.result.undo_token);
+      let countdown = 10;
+      const tick = () => {
+        if (countdown <= 0) { undoBtn.remove(); return; }
+        undoBtn.textContent = `↶ Undo (${countdown}s)`;
+        countdown--;
+        undoBtn._timer = setTimeout(tick, 1000);
+      };
+      tick();
+      undoBtn.addEventListener('click', async () => {
+        clearTimeout(undoBtn._timer);
+        undoBtn.disabled = true;
+        undoBtn.textContent = '…';
+        try {
+          await apiFetch('/api/ai/undo', {
+            method: 'POST',
+            body: JSON.stringify({ token }),
+          });
+          undoBtn.textContent = '✓ Undone';
+          toast('Undone');
+        } catch {
+          undoBtn.textContent = '↶ Failed';
+          undoBtn.disabled = false;
+        }
+      });
+      li.appendChild(undoBtn);
+    }
+    ul.appendChild(li);
+  }
+  log.appendChild(ul);
+  log.scrollTop = log.scrollHeight;
 }
 
 function describeAction(a) {
@@ -345,6 +517,44 @@ function describeAction(a) {
   }
 }
 
+// Same map chat.js uses — kept in sync here so the floating panel reloads
+// the underlying page when the assistant mutates data the user is viewing.
+const MUTATING_TOOL_PAGES = {
+  bulk_add_to_pantry:        ['pantry'],
+  pantry_set_in_stock:       ['pantry'],
+  pantry_restock:            ['pantry'],
+  pantry_remove:             ['pantry'],
+  pantry_update:             ['pantry'],
+  add_to_shopping_list:      ['shopping'],
+  shopping_check:            ['shopping'],
+  shopping_clear_checked:    ['shopping'],
+  shopping_organize_by_aisle:['shopping'],
+  shopping_build_from_plan:  ['shopping'],
+  shopping_remove:           ['shopping'],
+  set_meal_plan_day:         ['plan'],
+  plan_clear_day:            ['plan'],
+  plan_clear_week:           ['plan'],
+  plan_swap_days:            ['plan'],
+  apply_week_plan:           ['plan'],
+  update_recipe:             ['recipes-show', 'recipes-edit'],
+  update_recipe_ingredients: ['recipes-show', 'recipes-edit'],
+  update_recipe_steps:       ['recipes-show', 'recipes-edit'],
+  scale_recipe:              ['recipes-show'],
+  substitute_ingredient:     ['recipes-show', 'recipes-edit'],
+  toggle_favorite:           ['recipes-show', 'recipes-index', 'recipes-favorites'],
+  delete_recipe:             ['recipes-show', 'recipes-index', 'recipes-favorites'],
+};
+
+function toolMutatesCurrentPage(action) {
+  const r = action && action.result;
+  if (!r || r.ok === false) return false;
+  if (!r.committed && !r.undo_token) return false;
+  const pages = MUTATING_TOOL_PAGES[action && action.tool];
+  if (!pages) return false;
+  const current = document.querySelector('[data-page]')?.getAttribute('data-page') || '';
+  return pages.includes(current);
+}
+
 function applySideEffects(actions) {
   if (!actions || !actions.length) return;
   let navTarget = null;
@@ -354,6 +564,7 @@ function applySideEffects(actions) {
     if (!r || r.ok === false) continue;
     if (r.navigate_to && !navTarget) navTarget = r.navigate_to;
     if (r.reload) needsReload = true;
+    if (toolMutatesCurrentPage(a)) needsReload = true;
   }
   if (navTarget) {
     setTimeout(() => { window.location.href = navTarget; }, 900);

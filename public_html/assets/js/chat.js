@@ -262,6 +262,9 @@ async function init() {
       if (!r || r.ok === false) continue;
       if (r.navigate_to && !navTarget) navTarget = r.navigate_to;
       if (r.reload) needsReload = true;
+      // If a committed mutation affects the page the user is currently
+      // viewing, refresh it so they see the change.
+      if (toolMutatesCurrentPage(a)) needsReload = true;
     }
     if (navTarget) {
       // Small delay so the user can read the assistant's reply first.
@@ -423,17 +426,26 @@ async function init() {
     } catch {}
   }
 
+  const MEM_CAT_LABELS = {
+    diet: 'Diet', allergy: 'Allergy', dislike: 'Dislike', like: 'Like',
+    cuisine: 'Cuisine', household: 'Household', equipment: 'Equipment',
+    skill: 'Skill', schedule: 'Schedule', goal: 'Goal', other: 'Other',
+  };
+
   function addMemoryRow(m, prepend = false) {
     if (!m) return;
     const li = document.createElement('li');
     li.className = 'chat-mem-item';
     li.dataset.memId = m.id;
+    li.dataset.memCat = m.category;
     li.innerHTML = `
       <span class="chat-mem-cat pill"></span>
       <span class="chat-mem-fact"></span>
       <button class="icon-btn" type="button" data-chat="mem-del" aria-label="Forget">✕</button>
     `;
-    li.querySelector('.chat-mem-cat').textContent = m.category;
+    const catEl = li.querySelector('.chat-mem-cat');
+    catEl.textContent = MEM_CAT_LABELS[m.category] || (m.category || 'Other');
+    catEl.title = m.category || '';
     li.querySelector('.chat-mem-fact').textContent = m.fact;
     if (prepend) els.memList.prepend(li);
     else els.memList.appendChild(li);
@@ -453,6 +465,46 @@ async function init() {
       els.memCount.textContent = String(list.length);
     } catch {}
   }
+}
+
+// Map each chat tool to the set of `data-page` attributes it mutates. When
+// the assistant commits one of these tools and the user is currently looking
+// at that page, the chat surface reloads so the change is visible.
+const MUTATING_TOOL_PAGES = {
+  bulk_add_to_pantry:        ['pantry'],
+  pantry_set_in_stock:       ['pantry'],
+  pantry_restock:            ['pantry'],
+  pantry_remove:             ['pantry'],
+  pantry_update:             ['pantry'],
+  add_to_shopping_list:      ['shopping'],
+  shopping_check:            ['shopping'],
+  shopping_clear_checked:    ['shopping'],
+  shopping_organize_by_aisle:['shopping'],
+  shopping_build_from_plan:  ['shopping'],
+  shopping_remove:           ['shopping'],
+  set_meal_plan_day:         ['plan'],
+  plan_clear_day:            ['plan'],
+  plan_clear_week:           ['plan'],
+  plan_swap_days:            ['plan'],
+  apply_week_plan:           ['plan'],
+  update_recipe:             ['recipes-show', 'recipes-edit'],
+  update_recipe_ingredients: ['recipes-show', 'recipes-edit'],
+  update_recipe_steps:       ['recipes-show', 'recipes-edit'],
+  scale_recipe:              ['recipes-show'],
+  substitute_ingredient:     ['recipes-show', 'recipes-edit'],
+  toggle_favorite:           ['recipes-show', 'recipes-index', 'recipes-favorites'],
+  delete_recipe:             ['recipes-show', 'recipes-index', 'recipes-favorites'],
+};
+
+function toolMutatesCurrentPage(action) {
+  const r = action?.result;
+  if (!r || r.ok === false) return false;
+  // Only reload when the action *committed* (not on previews).
+  if (!r.committed && !r.undo_token) return false;
+  const pages = MUTATING_TOOL_PAGES[action?.tool];
+  if (!pages) return false;
+  const current = document.querySelector('[data-page]')?.getAttribute('data-page') || '';
+  return pages.includes(current);
 }
 
 // Tiny markdown: bold, italics, inline code, lists, line breaks. Escapes HTML first.
