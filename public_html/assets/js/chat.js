@@ -470,6 +470,10 @@ async function init() {
 // Map each chat tool to the set of `data-page` attributes it mutates. When
 // the assistant commits one of these tools and the user is currently looking
 // at that page, the chat surface reloads so the change is visible.
+//
+// Values must match the literal `data-page="…"` attribute rendered by the
+// view templates — not the logical names that page-specific JS modules
+// publish via setWindowContext(). The DOM is what the reload check reads.
 const MUTATING_TOOL_PAGES = {
   bulk_add_to_pantry:        ['pantry'],
   pantry_set_in_stock:       ['pantry'],
@@ -487,13 +491,13 @@ const MUTATING_TOOL_PAGES = {
   plan_clear_week:           ['plan'],
   plan_swap_days:            ['plan'],
   apply_week_plan:           ['plan'],
-  update_recipe:             ['recipes-show', 'recipes-edit'],
-  update_recipe_ingredients: ['recipes-show', 'recipes-edit'],
-  update_recipe_steps:       ['recipes-show', 'recipes-edit'],
+  update_recipe:             ['recipes-show', 'add'],
+  update_recipe_ingredients: ['recipes-show', 'add'],
+  update_recipe_steps:       ['recipes-show', 'add'],
   scale_recipe:              ['recipes-show'],
-  substitute_ingredient:     ['recipes-show', 'recipes-edit'],
-  toggle_favorite:           ['recipes-show', 'recipes-index', 'recipes-favorites'],
-  delete_recipe:             ['recipes-show', 'recipes-index', 'recipes-favorites'],
+  substitute_ingredient:     ['recipes-show', 'add'],
+  toggle_favorite:           ['recipes-show', 'recipes-index', 'favorites'],
+  delete_recipe:             ['recipes-show', 'recipes-index', 'favorites'],
 };
 
 function toolMutatesCurrentPage(action) {

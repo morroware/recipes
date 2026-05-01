@@ -519,6 +519,7 @@ function describeAction(a) {
 
 // Same map chat.js uses — kept in sync here so the floating panel reloads
 // the underlying page when the assistant mutates data the user is viewing.
+// Values must match literal `data-page` attributes from the view templates.
 const MUTATING_TOOL_PAGES = {
   bulk_add_to_pantry:        ['pantry'],
   pantry_set_in_stock:       ['pantry'],
@@ -536,13 +537,13 @@ const MUTATING_TOOL_PAGES = {
   plan_clear_week:           ['plan'],
   plan_swap_days:            ['plan'],
   apply_week_plan:           ['plan'],
-  update_recipe:             ['recipes-show', 'recipes-edit'],
-  update_recipe_ingredients: ['recipes-show', 'recipes-edit'],
-  update_recipe_steps:       ['recipes-show', 'recipes-edit'],
+  update_recipe:             ['recipes-show', 'add'],
+  update_recipe_ingredients: ['recipes-show', 'add'],
+  update_recipe_steps:       ['recipes-show', 'add'],
   scale_recipe:              ['recipes-show'],
-  substitute_ingredient:     ['recipes-show', 'recipes-edit'],
-  toggle_favorite:           ['recipes-show', 'recipes-index', 'recipes-favorites'],
-  delete_recipe:             ['recipes-show', 'recipes-index', 'recipes-favorites'],
+  substitute_ingredient:     ['recipes-show', 'add'],
+  toggle_favorite:           ['recipes-show', 'recipes-index', 'favorites'],
+  delete_recipe:             ['recipes-show', 'recipes-index', 'favorites'],
 };
 
 function toolMutatesCurrentPage(action) {
