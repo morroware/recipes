@@ -95,9 +95,16 @@ class Recipe {
 
     /**
      * Recipe-RAG search across the user's library. Looks at title, cuisine,
-     * summary, notes, ingredient names, step text, and tag — so the assistant
+     * summary, notes, ingredient names, step text, and tags — so the assistant
      * can find a saved recipe by partial title, cuisine, or remembered
      * ingredient.
+     *
+     * The query is tokenised on whitespace so multi-word searches still match
+     * titles whose punctuation differs (e.g. "One-Pan Chicken Black Beans
+     * Rice" finds the recipe titled "One-Pan Chicken, Black Beans & Rice").
+     * Each token must appear somewhere in the recipe's text — the model can
+     * therefore feed the full title back without worrying about commas,
+     * ampersands, or accents the user typed slightly differently.
      *
      * Pure LIKE (no FULLTEXT) so it works on every MySQL/MariaDB version a
      * shared cPanel host might run. Personal cookbooks rarely exceed a few
@@ -112,6 +119,8 @@ class Recipe {
         $query = trim($query);
         $limit = max(1, min(20, $limit));
 
+        $tokens = self::searchTokens($query);
+
         $select = 'SELECT DISTINCT r.id, r.title, r.cuisine, r.summary, r.time_minutes,
                           r.servings, r.difficulty, r.glyph, r.color, r.is_favorite';
         $from   = 'FROM recipes r';
@@ -119,12 +128,22 @@ class Recipe {
         $where  = ['r.user_id = :uid'];
         $params = [':uid' => $user_id];
 
-        if ($query !== '') {
+        if ($tokens) {
             $joins[] = 'LEFT JOIN ingredients i ON i.recipe_id = r.id';
             $joins[] = 'LEFT JOIN steps s ON s.recipe_id = r.id';
-            $where[] = '(r.title LIKE :q OR r.cuisine LIKE :q OR r.summary LIKE :q'
-                     . ' OR r.notes LIKE :q OR i.name LIKE :q OR s.text LIKE :q)';
-            $params[':q'] = '%' . $query . '%';
+            $joins[] = 'LEFT JOIN recipe_tags rtq ON rtq.recipe_id = r.id';
+            $tokenClauses = [];
+            foreach ($tokens as $idx => $t) {
+                $key = ':q' . $idx;
+                $tokenClauses[] = '('
+                    . "r.title LIKE $key OR r.cuisine LIKE $key OR r.summary LIKE $key"
+                    . " OR r.notes LIKE $key OR i.name LIKE $key OR s.text LIKE $key"
+                    . " OR rtq.tag LIKE $key"
+                    . ')';
+                $params[$key] = '%' . $t . '%';
+            }
+            // ALL tokens must match somewhere in the recipe (AND).
+            $where[] = '(' . implode(' AND ', $tokenClauses) . ')';
         }
 
         if (!empty($filters['cuisine']) && $filters['cuisine'] !== 'All') {
@@ -151,12 +170,16 @@ class Recipe {
              . ' WHERE ' . implode(' AND ', $where);
 
         // Prefer matches in title/cuisine over deep matches in steps/notes.
-        if ($query !== '') {
+        // Rank against the full original query first (a literal phrase match
+        // wins), then by favorite, then by title alphabetically.
+        if ($tokens) {
             $sql .= ' ORDER BY (CASE'
-                  . ' WHEN r.title LIKE :q THEN 1'
-                  . ' WHEN r.cuisine LIKE :q THEN 2'
-                  . ' WHEN r.summary LIKE :q THEN 3'
+                  . ' WHEN r.title LIKE :rank THEN 1'
+                  . ' WHEN r.cuisine LIKE :rank THEN 2'
+                  . ' WHEN r.summary LIKE :rank THEN 3'
                   . ' ELSE 4 END), r.is_favorite DESC, r.title ASC';
+            // Use the first (typically most distinctive) token for ranking.
+            $params[':rank'] = '%' . $tokens[0] . '%';
         } else {
             $sql .= ' ORDER BY r.is_favorite DESC, r.title ASC';
         }
@@ -175,6 +198,46 @@ class Recipe {
             if ($full) $out[] = $full;
         }
         return $out;
+    }
+
+    /**
+     * Tokenise a free-text search query for {@see search()}.
+     *
+     * - Lowercase + Unicode trim.
+     * - Strip leading/trailing punctuation and connector characters
+     *   (commas, ampersands, slashes, quotes, dashes…) but keep internal
+     *   ones so "one-pan" still matches a hyphenated title.
+     * - Drop tokens that are too short or are common stopwords ("and", "or",
+     *   "the", "with", "&"). They'd otherwise force-match every recipe and
+     *   silently empty the result set when AND-joined.
+     * - If every token gets filtered (e.g. the user typed "&" or "the"),
+     *   fall back to the trimmed original so the call still returns
+     *   something rather than a confusing zero-hit AND-of-nothing.
+     *
+     * @return string[]
+     */
+    private static function searchTokens(string $query): array {
+        $query = trim($query);
+        if ($query === '') return [];
+
+        $stopwords = [
+            'a','an','and','or','the','of','to','for','with','in','on',
+            '&','+','-','/','\\',
+        ];
+
+        $raw = preg_split('/\s+/u', $query) ?: [];
+        $tokens = [];
+        foreach ($raw as $t) {
+            // Trim outer punctuation; keep internal hyphens / apostrophes.
+            $t = preg_replace('/^[\p{P}\p{S}]+|[\p{P}\p{S}]+$/u', '', $t) ?? '';
+            if ($t === '') continue;
+            $lower = mb_strtolower($t, 'UTF-8');
+            if (mb_strlen($lower) < 2) continue;
+            if (in_array($lower, $stopwords, true)) continue;
+            $tokens[] = $t;
+        }
+        if (!$tokens) return [$query];
+        return $tokens;
     }
 
     public static function ingredients(int $recipe_id): array {

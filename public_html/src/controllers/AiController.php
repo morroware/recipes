@@ -456,6 +456,8 @@ class AiController {
                  . "- When you learn a stable preference (diet, allergy, dislike, equipment, schedule, household), call `remember_preference`. Don't ask permission — just remember it. Skip transient state like \"wants tacos tonight\".\n"
                  . "- When the user explicitly tells you to forget something, call `forget_preference` with the matching memory id.\n"
                  . "- When the user mentions a saved recipe by partial name or describes one (\"my chickpea curry\", \"that pasta with capers\"), call `recipe_search` to find it. The library list above only has titles — `recipe_search` returns full bodies (ingredients + steps). Use `recipe_get` if you already have the id.\n"
+                 . "- `recipe_search` is whitespace-tokenised across title/cuisine/summary/notes/ingredients/steps/tags. A response with `ok:true, count:0` means the search worked and simply found nothing — it does NOT mean the tool is broken. NEVER tell the user a tool is broken or having issues based on a zero-hit response. Instead, retry with a shorter / more distinctive query (one or two words from the title, e.g. \"shakshuka\" or \"cacio\"). Only treat a result as a failure when `ok:false` is returned.\n"
+                 . "- When you need to look up MULTIPLE recipes (e.g., to apply a 7-day plan), issue all the `recipe_search` calls IN PARALLEL within a single assistant turn. Don't go one-at-a-time across many turns — you'll burn the tool-loop budget. The runtime executes parallel tool_use blocks together and returns all results in one tool_result turn.\n"
                  . "- When the user pastes a list, recipe, fridge dump, grocery haul, or photo description and wants it stocked: (1) call `bulk_add_to_pantry` with confirm=false to preview the cleaned items. Strip out instructions/headers/prose — keep ONLY ingredient names. Normalise to lowercase singular (\"yellow onion\", \"olive oil\"). Assign each a category from: $allowedCats. Default in_stock=true unless they say otherwise. (2) Show the user the parsed list as a friendly bullet list and ask them to confirm (\"want me to add these? 🥕\"). (3) ONLY after they say yes, call the tool again with the SAME items and confirm=true. If they want to tweak the list first, parse their edits and re-preview before committing.\n"
                  . "- When they ask to add to shopping or set a meal-plan day, use the matching tool.\n"
                  . "- When they say they cooked / made / tried a dish, call `log_cooked_recipe`.\n"
@@ -468,7 +470,7 @@ class AiController {
                  . "- Recipes: `open_recipe`, `update_recipe` (metadata patch), `update_recipe_ingredients`, `update_recipe_steps`, `scale_recipe` (preview by default — set save=true+confirm=true to persist), `substitute_ingredient` (respect allergies/diet — refuse swaps that violate them), `toggle_favorite` (instant + reversible), `delete_recipe` (preview/commit + ask the user to repeat the title).\n"
                  . "- Pantry: `pantry_search`, `pantry_set_in_stock`, `pantry_restock` (when they bought something), `pantry_remove` (preview/commit; prefer set_in_stock=false unless they really want it gone), `pantry_update`.\n"
                  . "- Shopping: `shopping_check`, `shopping_clear_checked` (preview/commit), `shopping_organize_by_aisle` (you provide full {id,aisle} assignments), `shopping_build_from_plan`, `shopping_remove`.\n"
-                 . "- Plan: `plan_clear_day`, `plan_clear_week` (preview/commit), `plan_swap_days`, `apply_week_plan` (preview/commit; values must be recipe ids — call `recipe_search` first to find them).\n"
+                 . "- Plan: `plan_clear_day`, `plan_clear_week` (preview/commit), `plan_swap_days`, `apply_week_plan` (preview/commit; values must be recipe ids — call `recipe_search` in PARALLEL for every title in one turn, then call `apply_week_plan` with all the ids).\n"
                  . "- Settings/nav: `set_user_settings` (theme/mode/density/font/radius/units; reloads the page), `navigate` (whitelisted routes only).\n"
                  . "- Reversal: every reversible commit returns an `undo_token`. The user may already see an Undo button in the UI — but if they say \"undo that\", call the `undo` tool with the matching token.\n"
                  . "- For every preview/commit tool: call ONCE with confirm=false, present the diff/summary in plain language, ASK YES/NO, then call AGAIN with confirm=true ONLY after they explicitly agree.\n"
@@ -484,13 +486,16 @@ class AiController {
 
         $tools = array_merge(ai_chat_tools(), [ai_web_search_tool()]);
 
-        // Tool-use loop. Allow up to 4 hops so the model can save a memory,
-        // add a shopping item, etc., before producing the final reply.
+        // Tool-use loop. The model can fan out parallel tool_use blocks per
+        // hop, so most flows finish in 2–3 hops. The 8-hop ceiling is for
+        // outliers like a 7-recipe week plan that needs `recipe_search` ×7
+        // (in parallel) + `apply_week_plan` (preview) + `apply_week_plan`
+        // (commit) + a final summary turn.
         $totalUsage = ['input_tokens' => 0, 'output_tokens' => 0];
         $actions = [];
         $finalText = '';
 
-        for ($hop = 0; $hop < 5; $hop++) {
+        for ($hop = 0; $hop < 8; $hop++) {
             try {
                 $resp = ai_call($apiMessages, [
                     'system' => $systemBlocks,
