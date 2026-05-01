@@ -444,20 +444,61 @@ function ai_view_context(int $user_id, array $ctx): string {
             $items = [];
         }
         if ($items) {
-            $lines[] = '- Shopping list (' . count($items) . ' items):';
+            // Include the row id on every line so tools that take an id
+            // (shopping_check, shopping_remove, shopping_organize_by_aisle)
+            // can be called without an intervening lookup.
+            $lines[] = '- Shopping list (' . count($items) . ' items, ids shown so you can call shopping_* tools directly):';
             foreach (array_slice($items, 0, 40) as $it) {
                 $check = ((int)($it['checked'] ?? 0) === 1) ? '[x]' : '[ ]';
                 $qty = isset($it['qty']) && $it['qty'] !== null ? rtrim(rtrim((string)$it['qty'], '0'), '.') : '';
                 $unit = (string)($it['unit'] ?? '');
                 $name = (string)($it['name'] ?? '');
                 $src  = (string)($it['source_label'] ?? '');
+                $aisle = (string)($it['aisle'] ?? '');
                 $bits = array_filter([$qty, $unit, $name], fn($s) => $s !== '');
-                $line = '  ' . $check . ' ' . implode(' ', $bits);
+                $line = '  #' . (int)$it['id'] . ' ' . $check . ' ' . implode(' ', $bits);
+                if ($aisle !== '' && $aisle !== 'Other') $line .= ' [' . $aisle . ']';
                 if ($src !== '' && $src !== 'manual') $line .= ' (from ' . $src . ')';
                 $lines[] = $line;
             }
             if (count($items) > 40) {
-                $lines[] = '  …and ' . (count($items) - 40) . ' more.';
+                $lines[] = '  …and ' . (count($items) - 40) . ' more (call shopping_check / shopping_remove etc. with the visible ids; for items past 40, ask the user or use the relevant tool).';
+            }
+        }
+    }
+
+    if ($ctx['page'] === 'pantry') {
+        try {
+            $items = Pantry::listForUser($user_id);
+        } catch (Throwable $e) {
+            $items = [];
+        }
+        if ($items) {
+            // Group + cap so token cost stays bounded on big pantries; ids
+            // are surfaced so pantry_set_in_stock / pantry_remove etc. can
+            // be called without a prior pantry_search round-trip.
+            $byCat = [];
+            foreach ($items as $it) {
+                $byCat[(string)$it['category']][] = $it;
+            }
+            $shown = 0;
+            $cap = 60;
+            $lines[] = '- Pantry on this page (' . count($items) . ' items, ids shown so you can call pantry_* tools directly):';
+            foreach ($byCat as $cat => $rows) {
+                $lines[] = '  ' . $cat . ':';
+                foreach ($rows as $it) {
+                    if ($shown >= $cap) break 2;
+                    $name = (string)$it['name'];
+                    $check = ((int)$it['in_stock'] === 1) ? '✓' : '✗';
+                    $qty = isset($it['qty']) && $it['qty'] !== null ? rtrim(rtrim((string)$it['qty'], '0'), '.') : '';
+                    $unit = (string)($it['unit'] ?? '');
+                    $bits = array_filter([$qty, $unit, $name], fn($s) => $s !== '');
+                    $lines[] = '    #' . (int)$it['id'] . ' ' . $check . ' ' . implode(' ', $bits);
+                    $shown++;
+                }
+            }
+            if ($shown < count($items)) {
+                $lines[] = '  …and ' . (count($items) - $shown) . ' more (call pantry_search for the rest).';
             }
         }
     }
@@ -483,7 +524,7 @@ function ai_view_context(int $user_id, array $ctx): string {
     }
 
     if ($ctx['visible_ids'] && $ctx['recipe_id'] === null
-        && !in_array($ctx['page'], ['plan', 'shopping'], true)) {
+        && !in_array($ctx['page'], ['plan', 'shopping', 'pantry'], true)) {
         // Re-fetch each id and confirm ownership before naming them to the model.
         $ids = $ctx['visible_ids'];
         $pdo = db();
@@ -511,6 +552,80 @@ function ai_view_context(int $user_id, array $ctx): string {
     }
 
     return count($lines) > 1 ? implode("\n", $lines) : '';
+}
+
+/**
+ * Format / vocabulary cheat-sheet built from the live constants so the chat
+ * model knows the exact enums it will need when composing tool inputs.
+ *
+ * Lives in the cached system prompt — generating it from the constants
+ * (rather than hand-typing the lists in the prompt) means it can't drift
+ * when an enum is extended in PHP.
+ */
+function ai_format_reference(): string {
+    $aisles  = implode(' | ', array_map(fn($s) => '"' . $s . '"', AISLES));
+    $cats    = implode(' | ', array_map(fn($s) => '"' . $s . '"', PANTRY_CATEGORIES));
+    $colors  = '"mint" | "butter" | "peach" | "lilac" | "sky" | "blush" | "lime" | "coral"';
+    $diff    = '"Easy" | "Medium" | "Hard"';
+    $days    = implode(' | ', array_map(fn($s) => '"' . $s . '"', PLAN_DAYS));
+    $mcats   = implode(' | ', array_map(fn($s) => '"' . $s . '"', Memory::CATEGORIES));
+    $routes  = implode(' | ', array_map(fn($s) => '"' . $s . '"', AI_NAV_ROUTES));
+    $timeBuckets = '"< 30 min" | "30–60 min" | "> 60 min" (note the en-dash, not a hyphen, in the middle bucket)';
+
+    return implode("\n", [
+        '# Format reference (use these EXACT enum values when calling tools)',
+        '',
+        'Recipe object — save_recipe_to_book / update_recipe / parse helpers all use this shape:',
+        '  title         : string, ≤ 160 chars',
+        '  cuisine       : short string (e.g. "Italian", "Thai") or "" if unknown',
+        '  summary       : one-line tagline, ≤ 200 chars',
+        '  time_minutes  : integer, total active+waiting; default 30 if unsure',
+        '  servings      : integer ≥ 1; default 2 if unsure',
+        '  difficulty    : ' . $diff,
+        '  glyph         : exactly ONE emoji that fits the dish (🍝 🥘 🌮 …)',
+        '  color         : ' . $colors,
+        '  tags          : array of short lowercase words (e.g. ["weeknight","pasta"])',
+        '  ingredients   : array of {qty: string|null, unit: string, name: string, aisle: AISLE}',
+        '  steps         : ordered array of strings — one method step each',
+        '',
+        'AISLE (for ingredient.aisle, shopping_organize_by_aisle): ' . $aisles . '.',
+        'PANTRY CATEGORY (for bulk_add_to_pantry, pantry_update.category): ' . $cats . '.',
+        '  Note: AISLE and PANTRY CATEGORY share most values but the order differs and they are NOT interchangeable; pick the right enum for the field.',
+        '',
+        'Pantry item — bulk_add_to_pantry items[] entries:',
+        '  name      : lowercase singular noun ("yellow onion", "olive oil", "cumin"). NOT "Yellow Onions".',
+        '  qty       : optional string ("2", "1.5") or null',
+        '  unit      : optional short string ("lb", "cup", "tbsp") or ""',
+        '  category  : one of PANTRY CATEGORY above',
+        '  in_stock  : boolean (default true)',
+        '',
+        'DAY (set_meal_plan_day, plan_clear_day, plan_swap_days, apply_week_plan keys): canonical ' . $days . '.',
+        '  The server normalises "Monday"/"monday"/"Mondays"/"MON" too, but prefer the canonical form.',
+        '',
+        'MEMORY CATEGORY (remember_preference.category, extract output): ' . $mcats . '.',
+        '  weight: integer 1–10. 8–10 = hard constraints (allergies, strict diet); 4–7 = preference; 1–3 = mild.',
+        '',
+        'USER SETTINGS patch (set_user_settings.patch — every key independently optional):',
+        '  density        : "compact" | "cozy" | "airy"',
+        '  theme          : "rainbow" | "sunset" | "ocean" | "garden"',
+        '  mode           : "light" | "dark"',
+        '  font_pair      : "default" | "serif" | "mono" | "rounded"',
+        '  radius         : "sharp" | "default" | "round"',
+        '  card_style     : "mix" | "photo-only" | "glyph-only"',
+        '  sticker_rotate : boolean',
+        '  dot_grid       : boolean',
+        '  units          : "metric" | "imperial"',
+        '',
+        'NAV ROUTE (navigate.route, whitelist): ' . $routes . '.',
+        '',
+        'TIME BUCKET (recipe_search.time): ' . $timeBuckets . '.',
+        'RATING (log_cooked_recipe.rating): integer 1–5.',
+        '',
+        'ID conventions:',
+        '- Every recipe / pantry item / shopping item / memory has a numeric id.',
+        '- The "# Current view" block prefixes ids with "#" (e.g. "#42 [x] 2 cups flour"). Use the bare integer (42) when calling tools.',
+        '- Never invent ids — only use ids that appeared in this conversation (view block, kitchen context, prior tool result).',
+    ]);
 }
 
 /**
