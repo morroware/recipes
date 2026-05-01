@@ -22,8 +22,10 @@ if (form) {
 }
 
 // Publish the current filter set + visible recipe ids so the AI knows
-// which slice of the library the user is looking at.
-const browsePage = document.querySelector('[data-page="recipes-index"], [data-page="recipes-favorites"]');
+// which slice of the library the user is looking at. The favorites view
+// renders `data-page="favorites"`; the all-recipes index renders
+// `data-page="recipes-index"`. Both share this module.
+const browsePage = document.querySelector('[data-page="recipes-index"], [data-page="favorites"]');
 if (browsePage) {
   const fd = form ? new FormData(form) : null;
   const filters = {};
