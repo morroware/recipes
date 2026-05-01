@@ -72,9 +72,25 @@ $cooks    = $recent_cooks  ?? [];
           <button class="btn btn-sm btn-primary" type="submit">＋</button>
         </form>
         <ul class="chat-mem-list" data-chat="mem-list">
+          <?php
+          $catLabels = [
+              'diet'      => 'Diet',
+              'allergy'   => 'Allergy',
+              'dislike'   => 'Dislike',
+              'like'      => 'Like',
+              'cuisine'   => 'Cuisine',
+              'household' => 'Household',
+              'equipment' => 'Equipment',
+              'skill'     => 'Skill',
+              'schedule'  => 'Schedule',
+              'goal'      => 'Goal',
+              'other'     => 'Other',
+          ];
+          ?>
           <?php foreach ($mem as $m): ?>
-            <li class="chat-mem-item" data-mem-id="<?= (int)$m['id'] ?>">
-              <span class="chat-mem-cat pill"><?= h($m['category']) ?></span>
+            <?php $label = $catLabels[$m['category']] ?? ucfirst((string)$m['category']); ?>
+            <li class="chat-mem-item" data-mem-id="<?= (int)$m['id'] ?>" data-mem-cat="<?= h($m['category']) ?>">
+              <span class="chat-mem-cat pill" title="<?= h($m['category']) ?>"><?= h($label) ?></span>
               <span class="chat-mem-fact"><?= h($m['fact']) ?></span>
               <button class="icon-btn" type="button" data-chat="mem-del" aria-label="Forget">✕</button>
             </li>

@@ -1994,6 +1994,93 @@ nav[aria-label="Primary"] [aria-current="page"] {
   margin-top: 2px;
 }
 
+/* Floating-panel chat: structured action list (mirrors .chat-actions on /chat). */
+.ai-chat-actions-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ai-chat-action {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px dashed var(--ink-soft);
+  background: var(--cream);
+  color: var(--ink-2);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.ai-chat-action.err {
+  background: var(--coral, #FFB3B3);
+  color: var(--ink);
+  border-style: solid;
+}
+.ai-chat-action .chat-undo-btn {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 2px 8px;
+}
+
+/* Bulk-add preview / result list (floating panel "Bulk add" tab). */
+.ai-bulk-preview, .ai-bulk-result { display: flex; flex-direction: column; gap: 8px; }
+.ai-bulk-preview-head { font-size: 13px; line-height: 1.4; color: var(--ink-2); }
+.ai-bulk-preview-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.ai-bulk-preview-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px dashed var(--ink-soft);
+  border-radius: 8px;
+  background: var(--cream);
+  font-size: 13px;
+}
+.ai-bulk-preview-cat {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--lilac, #E2D2FF);
+  color: var(--ink);
+  flex-shrink: 0;
+}
+.ai-bulk-preview-name { flex: 1; font-weight: 500; }
+.ai-bulk-preview-qty {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+.ai-bulk-preview-item .icon-btn {
+  background: transparent;
+  border: 1px solid var(--ink-soft);
+  border-radius: 50%;
+  width: 22px; height: 22px;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.ai-bulk-preview-item .icon-btn:hover { background: var(--coral, #FFB3B3); border-color: var(--ink); }
+
 @media (max-width: 720px) {
   .chat-layout { grid-template-columns: 1fr; }
   .chat-rail { position: static; max-height: none; }
