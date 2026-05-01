@@ -69,6 +69,7 @@ $routes = [
 
     // JSON API
     ['POST', '#^/api/recipes$#',                             [RecipesController::class, 'apiCreate'],     true],
+    ['POST', '#^/api/uploads/recipe-image$#',                [RecipesController::class, 'apiUploadImage'], true],
     ['PUT',  '#^/api/recipes/(\d+)$#',                       [RecipesController::class, 'apiUpdate'],     true],
     ['DELETE','#^/api/recipes/(\d+)$#',                      [RecipesController::class, 'apiDelete'],     true],
     ['POST', '#^/api/recipes/(\d+)/favorite$#',              [RecipesController::class, 'toggleFavorite'], true],

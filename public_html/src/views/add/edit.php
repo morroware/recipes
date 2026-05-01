@@ -17,6 +17,7 @@ $d = [
     'color'        => $isEdit ? $recipe['color'] : 'mint',
     'summary'      => $isEdit ? $recipe['summary'] : '',
     'photo_url'    => $isEdit ? ($recipe['photo_url'] ?? '') : '',
+    'gallery_urls' => $isEdit ? ($recipe['gallery_urls'] ?? []) : [],
     'tags'         => $isEdit ? implode(', ', $recipe['tags'] ?? []) : '',
     'notes'        => $isEdit ? ($recipe['notes'] ?? '') : '',
     'ingredients'  => $isEdit ? $recipe['ingredients'] : [['qty'=>'','unit'=>'','name'=>'','aisle'=>'Pantry']],
@@ -110,6 +111,16 @@ $d = [
           <label class="form-label">Photo URL (optional)</label>
           <input class="form-input" name="photo_url" value="<?= h($d['photo_url']) ?>"
                  placeholder="/assets/img/uploads/lasagna.jpg or https://…">
+        </div>
+        <div class="form-field">
+          <label class="form-label">Gallery image URLs (optional, comma separated)</label>
+          <input class="form-input" name="gallery_urls" value="<?= h(implode(', ', (array)$d['gallery_urls'])) ?>"
+                 placeholder="/assets/img/uploads/lasagna-1.jpg, https://…">
+        </div>
+        <div class="form-field">
+          <label class="form-label">Upload images (gallery)</label>
+          <input class="form-input" type="file" name="gallery_files" data-js="gallery-files" accept="image/*" multiple>
+          <div class="muted" style="margin-top:8px;">Uploads append to the gallery URL list above.</div>
         </div>
       </div>
 

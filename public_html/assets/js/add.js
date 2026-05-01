@@ -14,6 +14,7 @@ if (page) {
     recipe_id: recipeId || null,
   });
   const form     = page.querySelector('[data-js="recipe-form"]');
+  const galleryFiles = page.querySelector('[data-js="gallery-files"]');
   const ingList  = page.querySelector('[data-js="ingredients"]');
   const stepList = page.querySelector('[data-js="steps"]');
 
@@ -112,6 +113,17 @@ if (page) {
       .map(row => row.querySelector('[data-field="step"]').value.trim())
       .filter(Boolean);
 
+    let galleryUrls = (fd.get('gallery_urls') || '').toString().split(',').map(s => s.trim()).filter(Boolean);
+    if (galleryFiles?.files?.length) {
+      for (const file of Array.from(galleryFiles.files)) {
+        const up = new FormData();
+        up.append('image', file);
+        const res = await apiFetch('/api/uploads/recipe-image', { method: 'POST', body: up });
+        if (res?.data?.url) galleryUrls.push(res.data.url);
+      }
+      galleryUrls = [...new Set(galleryUrls)];
+    }
+
     const payload = {
       title:        (fd.get('title') || '').toString().trim(),
       summary:      (fd.get('summary') || '').toString(),
@@ -122,6 +134,7 @@ if (page) {
       glyph:        (fd.get('glyph') || '🍽️').toString(),
       color:        (fd.get('color') || 'mint').toString(),
       photo_url:    (fd.get('photo_url') || '').toString().trim(),
+      gallery_urls: galleryUrls,
       tags:         (fd.get('tags') || '').toString(),
       notes:        (fd.get('notes') || '').toString(),
       ingredients,

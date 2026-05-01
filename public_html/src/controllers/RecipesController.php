@@ -138,6 +138,33 @@ class RecipesController {
         json_ok(['deleted' => true]);
     }
 
+    public function apiUploadImage(): void {
+        require_login();
+        csrf_require();
+        if (empty($_FILES['image']) || !is_array($_FILES['image'])) {
+            json_err('image_required', 422);
+        }
+        $f = $_FILES['image'];
+        if (($f['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+            json_err('upload_failed', 422);
+        }
+        $tmp = (string)($f['tmp_name'] ?? '');
+        if (!is_uploaded_file($tmp)) json_err('upload_invalid', 422);
+        $mime = mime_content_type($tmp) ?: '';
+        $extMap = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp', 'image/gif' => 'gif'];
+        if (!isset($extMap[$mime])) json_err('image_type_invalid', 422);
+        if (($f['size'] ?? 0) > 10 * 1024 * 1024) json_err('image_too_large', 422);
+
+        $destDir = APP_ROOT . '/assets/img/uploads';
+        if (!is_dir($destDir) && !mkdir($destDir, 0775, true) && !is_dir($destDir)) {
+            json_err('upload_dir_unavailable', 500);
+        }
+        $name = 'recipe-' . date('Ymd-His') . '-' . bin2hex(random_bytes(6)) . '.' . $extMap[$mime];
+        $dest = $destDir . '/' . $name;
+        if (!move_uploaded_file($tmp, $dest)) json_err('upload_store_failed', 500);
+        json_ok(['url' => '/assets/img/uploads/' . $name]);
+    }
+
     private static function readJson(): array {
         $raw = file_get_contents('php://input');
         if (!$raw) return [];
