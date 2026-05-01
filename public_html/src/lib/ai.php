@@ -12,6 +12,7 @@ declare(strict_types=1);
 const AI_DEFAULT_MODEL = 'claude-sonnet-4-6';
 const AI_API_URL       = 'https://api.anthropic.com/v1/messages';
 const AI_API_VERSION   = '2023-06-01';
+const AI_MAX_RETRIES   = 2;
 
 class AiException extends RuntimeException {}
 
@@ -65,37 +66,66 @@ function ai_call(array $messages, array $opts = []): array {
         }
     }
 
-    $ch = curl_init(AI_API_URL);
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_POST           => true,
-        CURLOPT_HTTPHEADER     => [
-            'Content-Type: application/json',
-            'x-api-key: ' . $key,
-            'anthropic-version: ' . AI_API_VERSION,
-        ],
-        CURLOPT_POSTFIELDS     => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-        CURLOPT_TIMEOUT        => 120,
-        CURLOPT_CONNECTTIMEOUT => 15,
-    ]);
+    $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if (!is_string($jsonPayload) || $jsonPayload === '') {
+        throw new AiException('Failed to encode Anthropic request payload.');
+    }
 
-    $body = curl_exec($ch);
-    $httpCode = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-    $err = curl_error($ch);
-    curl_close($ch);
+    $attempt = 0;
+    $maxRetries = isset($opts['retries']) ? max(0, (int)$opts['retries']) : AI_MAX_RETRIES;
+    while (true) {
+        $attempt++;
+        $ch = curl_init(AI_API_URL);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST           => true,
+            CURLOPT_HTTPHEADER     => [
+                'Content-Type: application/json',
+                'x-api-key: ' . $key,
+                'anthropic-version: ' . AI_API_VERSION,
+            ],
+            CURLOPT_POSTFIELDS     => $jsonPayload,
+            CURLOPT_TIMEOUT        => 120,
+            CURLOPT_CONNECTTIMEOUT => 15,
+        ]);
 
-    if ($body === false) {
-        throw new AiException('Anthropic API transport error: ' . $err);
+        $body = curl_exec($ch);
+        $httpCode = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        $curlErrNo = curl_errno($ch);
+        $err = curl_error($ch);
+        curl_close($ch);
+
+        $decoded = is_string($body) ? json_decode($body, true) : null;
+        $hasApiError = is_array($decoded) && isset($decoded['error']);
+        $shouldRetry = false;
+
+        if ($body === false) {
+            $retryableCurl = in_array($curlErrNo, [6, 7, 28, 35, 52, 56], true);
+            $shouldRetry = $retryableCurl;
+            if (!$shouldRetry || $attempt > ($maxRetries + 1)) {
+                throw new AiException('Anthropic API transport error: ' . ($err ?: 'unknown cURL error'));
+            }
+        } elseif (!is_array($decoded)) {
+            if ($attempt > ($maxRetries + 1)) {
+                throw new AiException('Anthropic API returned non-JSON response.');
+            }
+            $shouldRetry = true;
+        } elseif ($httpCode < 200 || $httpCode >= 300 || $hasApiError) {
+            $msg = (string)($decoded['error']['message'] ?? ('HTTP ' . $httpCode));
+            $apiType = strtolower((string)($decoded['error']['type'] ?? ''));
+            $retryableHttp = in_array($httpCode, [408, 409, 429], true) || ($httpCode >= 500 && $httpCode <= 599);
+            $retryableType = in_array($apiType, ['rate_limit_error', 'overloaded_error', 'api_error'], true);
+            $shouldRetry = $retryableHttp || $retryableType;
+            if (!$shouldRetry || $attempt > ($maxRetries + 1)) {
+                throw new AiException('Anthropic API error: ' . $msg);
+            }
+        } else {
+            return $decoded;
+        }
+
+        $backoffMs = min(2500, 250 * (2 ** ($attempt - 1)));
+        usleep($backoffMs * 1000);
     }
-    $decoded = json_decode((string)$body, true);
-    if (!is_array($decoded)) {
-        throw new AiException('Anthropic API returned non-JSON response.');
-    }
-    if ($httpCode < 200 || $httpCode >= 300 || isset($decoded['error'])) {
-        $msg = $decoded['error']['message'] ?? ('HTTP ' . $httpCode);
-        throw new AiException('Anthropic API error: ' . $msg);
-    }
-    return $decoded;
 }
 
 /** Concatenate all text blocks from a Messages API response. */
