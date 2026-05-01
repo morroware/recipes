@@ -7,6 +7,51 @@ declare(strict_types=1);
 class Plan {
 
     /**
+     * Coerce any reasonable spelling of a weekday into the canonical
+     * three-letter code stored in `meal_plan.day` ('Mon'..'Sun'). The
+     * AI assistant routinely passes 'Monday', 'monday', 'mon', 'Mondays'
+     * and the like — silently rejecting them used to surface as
+     * "no_valid_assignments" with no clue why.
+     *
+     * Returns null if the input doesn't look like any known day.
+     */
+    public static function normalizeDay(?string $raw): ?string {
+        if ($raw === null) return null;
+        $s = mb_strtolower(trim($raw), 'UTF-8');
+        if ($s === '') return null;
+        // Trim trailing punctuation/quote, plural 's', plain "day" suffix.
+        $s = preg_replace('/[\p{P}\p{S}]+$/u', '', $s) ?? $s;
+        if (str_ends_with($s, 's')) $s = mb_substr($s, 0, -1);
+
+        static $aliases = [
+            'mon' => 'Mon', 'monday' => 'Mon',
+            'tue' => 'Tue', 'tues' => 'Tue', 'tuesday' => 'Tue',
+            'wed' => 'Wed', 'weds' => 'Wed', 'wednesday' => 'Wed',
+            'thu' => 'Thu', 'thur' => 'Thu', 'thurs' => 'Thu', 'thursday' => 'Thu',
+            'fri' => 'Fri', 'friday' => 'Fri',
+            'sat' => 'Sat', 'saturday' => 'Sat',
+            'sun' => 'Sun', 'sunday' => 'Sun',
+        ];
+        return $aliases[$s] ?? null;
+    }
+
+    /**
+     * Normalise the keys of a plan map (`{Monday: 1, tues: 2}` →
+     * `{Mon: 1, Tue: 2}`). Unrecognised keys are dropped.
+     *
+     * @param array<string, mixed> $plan
+     * @return array<string, mixed>
+     */
+    public static function normalizePlanMap(array $plan): array {
+        $out = [];
+        foreach ($plan as $k => $v) {
+            $day = self::normalizeDay((string)$k);
+            if ($day !== null) $out[$day] = $v;
+        }
+        return $out;
+    }
+
+    /**
      * Returns map: ['Mon' => recipe_row|null, 'Tue' => …, …].
      * Recipe row is whatever Recipe::listForUser returns (single recipe shape).
      */

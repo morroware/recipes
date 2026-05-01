@@ -474,7 +474,16 @@ class AiController {
                  . "- Settings/nav: `set_user_settings` (theme/mode/density/font/radius/units; reloads the page), `navigate` (whitelisted routes only).\n"
                  . "- Reversal: every reversible commit returns an `undo_token`. The user may already see an Undo button in the UI — but if they say \"undo that\", call the `undo` tool with the matching token.\n"
                  . "- For every preview/commit tool: call ONCE with confirm=false, present the diff/summary in plain language, ASK YES/NO, then call AGAIN with confirm=true ONLY after they explicitly agree.\n"
-                 . "- For destructive operations (`delete_recipe`, `pantry_remove`, `plan_clear_week`, `shopping_clear_checked`), ALWAYS preview first; never skip straight to confirm=true.\n";
+                 . "- For destructive operations (`delete_recipe`, `pantry_remove`, `plan_clear_week`, `shopping_clear_checked`), ALWAYS preview first; never skip straight to confirm=true.\n"
+                 . "\n"
+                 . "Tool robustness (applies to EVERY tool, not just search):\n"
+                 . "- Tool results are diagnostic, not user-facing. Never tell the user a tool is \"broken\" or \"having issues\" based on a single response. Only `ok:false` is an error; `ok:true, count:0` means the tool worked and found nothing.\n"
+                 . "- When a tool returns `ok:false` with a `not_found` / `bad_id` error, the id you used is stale. Re-resolve it (recipe_search / pantry_search / shopping_check via the # Current view block) and retry — don't give up after one failure.\n"
+                 . "- When a search tool returns `count:0`, retry with a SHORTER, more distinctive query (one word from the title) before concluding nothing matches. Don't pass full quoted titles with punctuation as the search query — the tool tokenises on whitespace, so two or three meaningful words win.\n"
+                 . "- Day arguments (`set_meal_plan_day`, `plan_clear_day`, `plan_swap_days`, `apply_week_plan` keys) accept any spelling: 'Mon', 'Monday', 'monday', 'tues', etc. The server normalises them — but prefer the canonical 'Mon'..'Sun' form when you have a choice.\n"
+                 . "- When the user is on `/shopping`, `/pantry`, or `/plan`, the # Current view block lists items WITH their ids. Use those ids directly in shopping_*, pantry_*, plan_* tools — don't waste a hop on a *_search call when the id is already in your context.\n"
+                 . "- When you need to act on multiple things (apply a week plan, organize a shopping list, restock several pantry items), fan out the tool_use calls IN PARALLEL within ONE assistant turn. The tool loop has a finite hop budget; serial one-per-turn calls will run out.\n"
+                 . "- Never invent ids. Only use ids you can see in the # Current view block, in `# Kitchen context`, or that came back from a prior tool result in this same conversation.\n";
 
         $systemBlocks = [
             ['type' => 'text', 'text' => $stableSystem, 'cache_control' => ['type' => 'ephemeral']],
@@ -603,13 +612,20 @@ class AiController {
                     foreach ($hits as $r) {
                         $shaped[] = self::shapeRecipeForModel($r);
                     }
-                    return ['ok' => true, 'count' => count($shaped), 'recipes' => $shaped];
+                    return [
+                        'ok'    => true,
+                        'count' => count($shaped),
+                        'recipes' => $shaped,
+                        'note'  => count($shaped) === 0
+                            ? 'Search worked; nothing matched. Retry with one or two distinctive words from the title (e.g. "shakshuka", "cacio") rather than the full punctuated title. A zero-hit result NEVER means the tool is broken.'
+                            : null,
+                    ];
 
                 case 'recipe_get':
                     $rid = (int)($input['id'] ?? 0);
-                    if ($rid <= 0) return ['ok' => false, 'error' => 'bad_id'];
+                    if ($rid <= 0) return ['ok' => false, 'error' => 'bad_id', 'message' => 'Pass a positive integer recipes.id; if you only have a title, call recipe_search first.'];
                     $r = Recipe::findFull($uid, $rid);
-                    if (!$r) return ['ok' => false, 'error' => 'recipe_not_found'];
+                    if (!$r) return ['ok' => false, 'error' => 'recipe_not_found', 'message' => "No recipe with id $rid for this user. The id may be stale — call recipe_search again."];
                     return ['ok' => true, 'recipe' => self::shapeRecipeForModel($r)];
 
                 case 'remember_preference':
@@ -690,14 +706,17 @@ class AiController {
                         'failed'       => $failed,
                     ];
 
-                case 'set_meal_plan_day':
-                    $day = (string)($input['day'] ?? '');
+                case 'set_meal_plan_day': {
+                    $day = Plan::normalizeDay((string)($input['day'] ?? ''));
                     $rid = (int)($input['recipe_id'] ?? 0);
-                    if (!in_array($day, PLAN_DAYS, true)) return ['ok' => false, 'error' => 'bad_day'];
+                    if ($day === null) {
+                        return ['ok' => false, 'error' => 'bad_day', 'message' => 'Day must be one of Mon..Sun (or Monday..Sunday).'];
+                    }
                     $r = Recipe::findById($uid, $rid);
-                    if (!$r) return ['ok' => false, 'error' => 'recipe_not_found'];
+                    if (!$r) return ['ok' => false, 'error' => 'recipe_not_found', 'message' => "No recipe with id $rid in this user's library. Use recipe_search first to resolve titles to ids."];
                     Plan::setDay($uid, $day, $rid);
                     return ['ok' => true, 'day' => $day, 'recipe_id' => $rid];
+                }
 
                 case 'save_recipe_to_book':
                     $recipe  = is_array($input['recipe'] ?? null) ? $input['recipe'] : [];
@@ -817,11 +836,25 @@ class AiController {
 
                 // ---- Phase 2: Pantry ------------------------------------------
                 case 'pantry_search': {
-                    $query = mb_strtolower(trim((string)($input['query'] ?? '')));
-                    $items = Pantry::listForUser($uid);
+                    // Tokenise on whitespace + normalise punctuation so the
+                    // model can pass natural phrasing ("yellow onions and red
+                    // peppers") and still find every matching item. Each
+                    // surviving token must appear somewhere in the pantry
+                    // item's name OR its normalised key.
+                    $rawQuery = trim((string)($input['query'] ?? ''));
+                    $tokens   = self::tokenizeSearch($rawQuery);
+                    $items    = Pantry::listForUser($uid);
                     $out = [];
                     foreach ($items as $it) {
-                        if ($query !== '' && mb_stripos((string)$it['name'], $query) === false) continue;
+                        $hay = mb_strtolower((string)$it['name'] . ' ' . (string)($it['key_normalized'] ?? ''), 'UTF-8');
+                        $matchAll = true;
+                        foreach ($tokens as $t) {
+                            if (mb_stripos($hay, mb_strtolower($t, 'UTF-8')) === false) {
+                                $matchAll = false;
+                                break;
+                            }
+                        }
+                        if (!$matchAll) continue;
                         if (array_key_exists('in_stock', $input)) {
                             $want = (bool)$input['in_stock'];
                             if ((bool)$it['in_stock'] !== $want) continue;
@@ -837,7 +870,14 @@ class AiController {
                         ];
                         if (count($out) >= 30) break;
                     }
-                    return ['ok' => true, 'count' => count($out), 'items' => $out];
+                    return [
+                        'ok'    => true,
+                        'count' => count($out),
+                        'items' => $out,
+                        'note'  => count($out) === 0
+                            ? 'Search worked; nothing matched. Try a shorter / single-word query (e.g. "onion" instead of "yellow onions and shallots").'
+                            : null,
+                    ];
                 }
 
                 case 'pantry_set_in_stock': {
@@ -1035,8 +1075,10 @@ class AiController {
 
                 // ---- Phase 2: Plan --------------------------------------------
                 case 'plan_clear_day': {
-                    $day = (string)($input['day'] ?? '');
-                    if (!in_array($day, PLAN_DAYS, true)) return ['ok' => false, 'error' => 'bad_day'];
+                    $day = Plan::normalizeDay((string)($input['day'] ?? ''));
+                    if ($day === null) {
+                        return ['ok' => false, 'error' => 'bad_day', 'message' => 'Day must be one of Mon..Sun (or Monday..Sunday).'];
+                    }
                     $byDay = Plan::forUser($uid);
                     $prev  = $byDay[$day] ?? null;
                     Plan::setDay($uid, $day, null);
@@ -1074,12 +1116,12 @@ class AiController {
                 }
 
                 case 'plan_swap_days': {
-                    $a = (string)($input['a'] ?? '');
-                    $b = (string)($input['b'] ?? '');
-                    if (!in_array($a, PLAN_DAYS, true) || !in_array($b, PLAN_DAYS, true)) {
-                        return ['ok' => false, 'error' => 'bad_day'];
+                    $a = Plan::normalizeDay((string)($input['a'] ?? ''));
+                    $b = Plan::normalizeDay((string)($input['b'] ?? ''));
+                    if ($a === null || $b === null) {
+                        return ['ok' => false, 'error' => 'bad_day', 'message' => 'Both days must be one of Mon..Sun (or Monday..Sunday).'];
                     }
-                    if ($a === $b) return ['ok' => false, 'error' => 'same_day'];
+                    if ($a === $b) return ['ok' => false, 'error' => 'same_day', 'message' => 'a and b are the same day; nothing to swap.'];
                     $byDay = Plan::forUser($uid);
                     $aId = ($byDay[$a] ?? null) ? (int)$byDay[$a]['id'] : null;
                     $bId = ($byDay[$b] ?? null) ? (int)$byDay[$b]['id'] : null;
@@ -1095,12 +1137,16 @@ class AiController {
                 }
 
                 case 'apply_week_plan': {
-                    $plan = is_array($input['plan'] ?? null) ? $input['plan'] : [];
+                    $rawPlan = is_array($input['plan'] ?? null) ? $input['plan'] : [];
                     $confirm = !empty($input['confirm']);
+                    // Normalise day keys ('Monday'/'mon'/'MON' all → 'Mon')
+                    // before validating so the model's natural phrasing
+                    // doesn't silently drop on the floor.
+                    $plan = Plan::normalizePlanMap($rawPlan);
                     $clean = [];
                     $invalid = [];
+                    $unknownDays = array_diff(array_keys($rawPlan), array_keys($plan));
                     foreach ($plan as $day => $rid) {
-                        if (!in_array($day, PLAN_DAYS, true)) continue;
                         if ($rid === null || $rid === '') {
                             $clean[$day] = null;
                             continue;
@@ -1111,7 +1157,15 @@ class AiController {
                         if (!$r) { $invalid[] = $day; continue; }
                         $clean[$day] = ['id' => $rid, 'title' => (string)$r['title']];
                     }
-                    if (!$clean) return ['ok' => false, 'error' => 'no_valid_assignments', 'invalid_days' => $invalid];
+                    if (!$clean) {
+                        return [
+                            'ok' => false,
+                            'error' => 'no_valid_assignments',
+                            'invalid_days'  => $invalid,
+                            'unknown_keys'  => array_values($unknownDays),
+                            'message' => 'No usable day → recipe pairs. Day keys must be Mon..Sun; recipe ids must reference existing recipes (use recipe_search to resolve titles to ids).',
+                        ];
+                    }
                     if (!$confirm) {
                         $previewMap = [];
                         foreach ($clean as $d => $v) $previewMap[$d] = $v ? $v['title'] : '(clear)';
@@ -1682,6 +1736,18 @@ class AiController {
             'matched_count' => $matched,
             'removed_count' => $removed,
         ];
+    }
+
+    /**
+     * Tokenise a search query the same way {@see Recipe::search()} does, so
+     * pantry_search and any other free-text tool can use a consistent set of
+     * rules for what counts as a "word". Empty queries return [].
+     *
+     * @return string[]
+     */
+    private static function tokenizeSearch(string $query): array {
+        if (trim($query) === '') return [];
+        return Recipe::searchTokens($query);
     }
 
     /** Trim a Recipe::findFull row down to the fields useful in tool responses. */

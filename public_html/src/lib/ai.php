@@ -444,20 +444,61 @@ function ai_view_context(int $user_id, array $ctx): string {
             $items = [];
         }
         if ($items) {
-            $lines[] = '- Shopping list (' . count($items) . ' items):';
+            // Include the row id on every line so tools that take an id
+            // (shopping_check, shopping_remove, shopping_organize_by_aisle)
+            // can be called without an intervening lookup.
+            $lines[] = '- Shopping list (' . count($items) . ' items, ids shown so you can call shopping_* tools directly):';
             foreach (array_slice($items, 0, 40) as $it) {
                 $check = ((int)($it['checked'] ?? 0) === 1) ? '[x]' : '[ ]';
                 $qty = isset($it['qty']) && $it['qty'] !== null ? rtrim(rtrim((string)$it['qty'], '0'), '.') : '';
                 $unit = (string)($it['unit'] ?? '');
                 $name = (string)($it['name'] ?? '');
                 $src  = (string)($it['source_label'] ?? '');
+                $aisle = (string)($it['aisle'] ?? '');
                 $bits = array_filter([$qty, $unit, $name], fn($s) => $s !== '');
-                $line = '  ' . $check . ' ' . implode(' ', $bits);
+                $line = '  #' . (int)$it['id'] . ' ' . $check . ' ' . implode(' ', $bits);
+                if ($aisle !== '' && $aisle !== 'Other') $line .= ' [' . $aisle . ']';
                 if ($src !== '' && $src !== 'manual') $line .= ' (from ' . $src . ')';
                 $lines[] = $line;
             }
             if (count($items) > 40) {
-                $lines[] = '  …and ' . (count($items) - 40) . ' more.';
+                $lines[] = '  …and ' . (count($items) - 40) . ' more (call shopping_check / shopping_remove etc. with the visible ids; for items past 40, ask the user or use the relevant tool).';
+            }
+        }
+    }
+
+    if ($ctx['page'] === 'pantry') {
+        try {
+            $items = Pantry::listForUser($user_id);
+        } catch (Throwable $e) {
+            $items = [];
+        }
+        if ($items) {
+            // Group + cap so token cost stays bounded on big pantries; ids
+            // are surfaced so pantry_set_in_stock / pantry_remove etc. can
+            // be called without a prior pantry_search round-trip.
+            $byCat = [];
+            foreach ($items as $it) {
+                $byCat[(string)$it['category']][] = $it;
+            }
+            $shown = 0;
+            $cap = 60;
+            $lines[] = '- Pantry on this page (' . count($items) . ' items, ids shown so you can call pantry_* tools directly):';
+            foreach ($byCat as $cat => $rows) {
+                $lines[] = '  ' . $cat . ':';
+                foreach ($rows as $it) {
+                    if ($shown >= $cap) break 2;
+                    $name = (string)$it['name'];
+                    $check = ((int)$it['in_stock'] === 1) ? '✓' : '✗';
+                    $qty = isset($it['qty']) && $it['qty'] !== null ? rtrim(rtrim((string)$it['qty'], '0'), '.') : '';
+                    $unit = (string)($it['unit'] ?? '');
+                    $bits = array_filter([$qty, $unit, $name], fn($s) => $s !== '');
+                    $lines[] = '    #' . (int)$it['id'] . ' ' . $check . ' ' . implode(' ', $bits);
+                    $shown++;
+                }
+            }
+            if ($shown < count($items)) {
+                $lines[] = '  …and ' . (count($items) - $shown) . ' more (call pantry_search for the rest).';
             }
         }
     }
@@ -483,7 +524,7 @@ function ai_view_context(int $user_id, array $ctx): string {
     }
 
     if ($ctx['visible_ids'] && $ctx['recipe_id'] === null
-        && !in_array($ctx['page'], ['plan', 'shopping'], true)) {
+        && !in_array($ctx['page'], ['plan', 'shopping', 'pantry'], true)) {
         // Re-fetch each id and confirm ownership before naming them to the model.
         $ids = $ctx['visible_ids'];
         $pdo = db();

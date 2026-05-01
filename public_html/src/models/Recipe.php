@@ -203,6 +203,9 @@ class Recipe {
     /**
      * Tokenise a free-text search query for {@see search()}.
      *
+     * Also reused by {@see AiController::tokenizeSearch()} so the recipe
+     * search and the pantry search agree on what "two words" means.
+     *
      * - Lowercase + Unicode trim.
      * - Strip leading/trailing punctuation and connector characters
      *   (commas, ampersands, slashes, quotes, dashes…) but keep internal
@@ -216,7 +219,7 @@ class Recipe {
      *
      * @return string[]
      */
-    private static function searchTokens(string $query): array {
+    public static function searchTokens(string $query): array {
         $query = trim($query);
         if ($query === '') return [];
 
