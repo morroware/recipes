@@ -39,6 +39,15 @@ $stepsJson       = json_encode(array_column($recipe['steps'], 'text'), JSON_UNES
           <span><?= h($recipe['glyph']) ?></span>
         <?php endif; ?>
       </div>
+      <?php if (!empty($recipe['gallery_urls']) && is_array($recipe['gallery_urls'])): ?>
+        <div class="row" style="margin-top:10px; gap:8px; overflow:auto; padding-bottom:4px;">
+          <?php foreach ($recipe['gallery_urls'] as $g): ?>
+            <a href="<?= h($g) ?>" target="_blank" rel="noopener noreferrer"
+               style="width:84px;height:84px;border-radius:12px;display:block;flex:0 0 auto;border:2px solid var(--ink);
+                      background-image:url('<?= h($g) ?>');background-size:cover;background-position:center;"></a>
+          <?php endforeach; ?>
+        </div>
+      <?php endif; ?>
       <div class="detail-section">
         <h2>Ingredients</h2>
         <div class="row no-print" style="margin-bottom: 14px; gap: 8px; align-items: center;">

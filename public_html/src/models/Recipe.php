@@ -5,6 +5,7 @@
 declare(strict_types=1);
 
 class Recipe {
+    private const GALLERY_PREFIX = '[gallery_json]';
 
     /**
      * List recipes for a user with optional filters.
@@ -74,6 +75,9 @@ class Recipe {
         $r = $stmt->fetch();
         if (!$r) return null;
 
+        $meta = self::extractGalleryMeta((string)($r['notes'] ?? ''));
+        $r['notes']       = $meta['notes'];
+        $r['gallery_urls']= $meta['gallery_urls'];
         $r['tags']        = self::tagsByRecipe([(int)$r['id']])[(int)$r['id']] ?? [];
         $r['ingredients'] = self::ingredients($recipe_id);
         $r['steps']       = self::steps($recipe_id);
@@ -462,6 +466,21 @@ class Recipe {
             }
         }
 
+        $gallery = [];
+        $rawGallery = $data['gallery_urls'] ?? [];
+        if (is_string($rawGallery) && trim($rawGallery) !== '') {
+            $rawGallery = array_map('trim', explode(',', $rawGallery));
+        }
+        if (is_array($rawGallery)) {
+            foreach ($rawGallery as $g) {
+                $g = trim((string)$g);
+                if ($g === '') continue;
+                if (!preg_match('#^(https?://|/)#i', $g)) continue;
+                if (!in_array($g, $gallery, true)) $gallery[] = mb_substr($g, 0, 512);
+            }
+        }
+        $notes = self::embedGalleryMeta($notes, $gallery);
+
         return [
             'title'        => mb_substr($title, 0, 160),
             'cuisine'      => mb_substr($cuisine, 0, 64),
@@ -477,6 +496,31 @@ class Recipe {
             'steps'        => $steps,
             'tags'         => $tags,
         ];
+    }
+
+    private static function extractGalleryMeta(string $notes): array {
+        $notes = trim($notes);
+        $gallery = [];
+        if (str_starts_with($notes, self::GALLERY_PREFIX)) {
+            $lineEnd = strpos($notes, "\n");
+            $head = $lineEnd === false ? $notes : substr($notes, 0, $lineEnd);
+            $json = trim(substr($head, strlen(self::GALLERY_PREFIX)));
+            $parsed = json_decode($json, true);
+            if (is_array($parsed)) {
+                foreach ($parsed as $u) {
+                    $u = trim((string)$u);
+                    if ($u !== '') $gallery[] = $u;
+                }
+            }
+            $notes = $lineEnd === false ? '' : ltrim(substr($notes, $lineEnd + 1));
+        }
+        return ['notes' => $notes, 'gallery_urls' => array_values(array_unique($gallery))];
+    }
+
+    private static function embedGalleryMeta(string $notes, array $gallery): string {
+        $clean = self::extractGalleryMeta($notes)['notes'];
+        if (!$gallery) return $clean;
+        return self::GALLERY_PREFIX . json_encode(array_values($gallery), JSON_UNESCAPED_SLASHES) . "\n" . $clean;
     }
 
     private static function writeIngredients(int $recipe_id, array $ingredients): void {
