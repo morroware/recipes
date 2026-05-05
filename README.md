@@ -51,13 +51,24 @@ var) enables Claude-powered features:
 
 ### Database upgrade
 
-Existing installs need the new AI tables. Run the additive migration:
+Existing installs need the new AI tables. Two ways to apply migrations:
+
+**Web (recommended for shared cPanel hosts without SSH).** Visit
+`/migrate.php` while signed in as the admin. It walks every file in
+`public_html/db/migrations/`, applies anything that hasn't run on this
+database yet, and reports per-file pass/fail. Safe to re-run — applied
+migrations are recorded in a `schema_migrations` table and skipped on
+subsequent visits. If a future migration ever locks you out of login, you
+can also reach it via `/migrate.php?key=<app_key>` using the value already
+written into `config.php`.
+
+**CLI (if you have SSH/`mysql` access):**
 
 ```sh
 mysql -u <user> -p <db> < public_html/db/migrations/001_ai_memory.sql
 ```
 
-Fresh installs get them automatically from `public_html/db/schema.sql`.
+Fresh installs get the AI tables automatically from `public_html/db/schema.sql`.
 
 The default model is `claude-sonnet-4-6`. System prompts are sent with
 ephemeral prompt caching so back-to-back requests reuse cached context.
