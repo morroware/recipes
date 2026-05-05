@@ -35,13 +35,15 @@ export async function apiFetch(url, opts = {}) {
     throw e;
   }
   let body = null;
-  try { body = await res.json(); } catch { /* not JSON */ }
+  try { body = await res.json(); } catch { /* not JSON / empty 204 */ }
   if (!res.ok || (body && body.ok === false)) {
     const msg = (body && body.error) ? body.error : `Request failed (${res.status})`;
     toast(msg, 'error');
     throw new Error(msg);
   }
-  return body;
+  // Always return an object so `const { data } = await apiFetch(...)` doesn't
+  // explode on empty/204 responses.
+  return body || { ok: true, data: null };
 }
 
 let toastEl = null;

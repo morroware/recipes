@@ -68,5 +68,5 @@ $colors = STICKER_COLORS;
   'color'        => $r['color'],
   'photo_url'    => $r['photo_url'] ?? null,
   'tags'         => $r['tags'] ?? [],
-], $recipes), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
+], $recipes), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?></script>
 <script type="module" src="<?= h(url_for('/assets/js/plan.js')) ?>"></script>

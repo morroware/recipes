@@ -70,7 +70,9 @@ class ShoppingController {
     public function apiAddFromRecipe(string $id): void {
         $uid = require_login();
         csrf_require();
-        $scale = isset($_GET['scale']) ? max(0.1, (float)$_GET['scale']) : 1.0;
+        // Clamp aggressively — the recipe's DECIMAL(10,3) qty * scale must stay
+        // within column range. 50× is plenty for "scale up for a party".
+        $scale = isset($_GET['scale']) ? max(0.1, min(50.0, (float)$_GET['scale'])) : 1.0;
         try {
             $res = Shopping::addFromRecipe($uid, (int)$id, $scale);
         } catch (InvalidArgumentException $e) {

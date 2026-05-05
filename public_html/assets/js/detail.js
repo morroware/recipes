@@ -82,24 +82,93 @@ if (root) {
   async function logCooked(btn) {
     const id = btn.dataset.recipeId;
     const title = btn.dataset.recipeTitle || '';
-    const ratingRaw = prompt('How was it? Rate 1–5 (or leave blank to skip).', '');
-    if (ratingRaw === null) return;
-    let rating = parseInt(ratingRaw, 10);
-    if (!Number.isFinite(rating) || rating < 1 || rating > 5) rating = null;
-    const notes = prompt('Quick notes? (optional)', '') || null;
+    const result = await openCookLogDialog(title);
+    if (!result) return;
     btn.disabled = true;
     try {
       await apiFetch('/api/cooking-log', {
         method: 'POST',
-        body: JSON.stringify({ recipe_id: id ? Number(id) : null, recipe_title: title, rating, notes }),
+        body: JSON.stringify({
+          recipe_id: id ? Number(id) : null,
+          recipe_title: title,
+          rating: result.rating,
+          notes: result.notes,
+        }),
       });
       toast('🍽️ Logged. The assistant will remember.');
       btn.classList.add('btn-mint');
     } catch {
-      // toast already shown
+      /* toast already shown */
     } finally {
       btn.disabled = false;
     }
+  }
+
+  // Inline rating + notes dialog. Returns {rating: number|null, notes: string|null}
+  // on save, or null on cancel. iOS prompt() is awful, this is much friendlier.
+  function openCookLogDialog(title) {
+    return new Promise((resolve) => {
+      const dlg = document.createElement('dialog');
+      dlg.className = 'cook-log-dialog';
+      dlg.setAttribute('aria-label', 'Log this cook');
+      dlg.innerHTML = `
+        <form method="dialog" class="cook-log-form" novalidate>
+          <h3 style="margin: 0 0 4px;">🍽️ I made this</h3>
+          <p class="muted" style="margin: 0 0 12px; font-size: 13px;"></p>
+          <div class="cook-log-stars" role="radiogroup" aria-label="Rating">
+            ${[1,2,3,4,5].map(n => `
+              <button type="button" class="cook-log-star" data-star="${n}"
+                      aria-label="${n} star${n === 1 ? '' : 's'}"
+                      role="radio" aria-checked="false">☆</button>
+            `).join('')}
+            <button type="button" class="btn btn-sm btn-ghost cook-log-clear" aria-label="Clear rating">No rating</button>
+          </div>
+          <label class="cook-log-notes-label">
+            <span class="page-eyebrow">NOTES (OPTIONAL)</span>
+            <textarea class="form-textarea cook-log-notes" rows="3"
+              placeholder="Used less salt; doubled the sauce…"></textarea>
+          </label>
+          <div class="cook-log-actions">
+            <button type="button" class="btn btn-ghost" data-act="cancel">Cancel</button>
+            <button type="submit" class="btn btn-primary" data-act="save">Save</button>
+          </div>
+        </form>
+      `;
+      dlg.querySelector('p.muted').textContent = title || '';
+      document.body.appendChild(dlg);
+
+      let rating = null;
+      const stars = Array.from(dlg.querySelectorAll('.cook-log-star'));
+      const paint = () => {
+        stars.forEach(b => {
+          const n = parseInt(b.dataset.star, 10);
+          const on = rating !== null && n <= rating;
+          b.textContent = on ? '★' : '☆';
+          b.classList.toggle('active', on);
+          b.setAttribute('aria-checked', rating === n ? 'true' : 'false');
+        });
+      };
+      stars.forEach(b => b.addEventListener('click', () => {
+        const n = parseInt(b.dataset.star, 10);
+        rating = (rating === n) ? null : n;
+        paint();
+      }));
+      dlg.querySelector('.cook-log-clear').addEventListener('click', () => { rating = null; paint(); });
+
+      const cleanup = (val) => { dlg.close(); dlg.remove(); resolve(val); };
+      dlg.querySelector('[data-act="cancel"]').addEventListener('click', () => cleanup(null));
+      dlg.addEventListener('close', () => { if (dlg.isConnected) dlg.remove(); });
+      dlg.addEventListener('cancel', (e) => { e.preventDefault(); cleanup(null); });
+      dlg.querySelector('form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const notes = (dlg.querySelector('.cook-log-notes').value || '').trim();
+        cleanup({ rating, notes: notes || null });
+      });
+
+      if (typeof dlg.showModal === 'function') dlg.showModal();
+      else dlg.setAttribute('open', '');
+      stars[0]?.focus();
+    });
   }
 
 

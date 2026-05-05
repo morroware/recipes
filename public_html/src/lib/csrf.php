@@ -29,7 +29,17 @@ function csrf_check(): bool {
 function csrf_require(): void {
     if (!csrf_check()) {
         http_response_code(419);
-        if (str_starts_with($_SERVER['REQUEST_URI'] ?? '/', '/api/')) {
+        $uri = $_SERVER['REQUEST_URI'] ?? '/';
+        $path = parse_url($uri, PHP_URL_PATH) ?: '/';
+        // Strip the app's base path (subdir installs) before deciding whether
+        // this is an API request, so /cookbook/api/foo still gets JSON.
+        if (function_exists('app_base_path')) {
+            $base = app_base_path();
+            if ($base !== '' && str_starts_with($path, $base)) {
+                $path = substr($path, strlen($base)) ?: '/';
+            }
+        }
+        if (str_starts_with($path, '/api/')) {
             header('Content-Type: application/json');
             echo json_encode(['ok' => false, 'error' => 'csrf_invalid']);
         } else {

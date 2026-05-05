@@ -144,13 +144,6 @@ class Tweaks {
     this.installFab();
   }
 
-  installStyle() {
-    const el = document.createElement('style');
-    el.id = 'tweaks-style';
-    el.textContent = STYLE;
-    document.head.appendChild(el);
-  }
-
   installFab() {
     const fab = document.createElement('button');
     fab.type = 'button';
@@ -278,10 +271,18 @@ class Tweaks {
           method: 'PUT',
           body: JSON.stringify(body),
         });
-      } catch {
-        toast('Couldn’t save tweaks', 'error');
-      }
+      } catch { /* apiFetch already showed an error toast */ }
     }, 350);
+  }
+
+  installStyle() {
+    // De-dupe the style tag so a second tweaks.js load (e.g. cache-bust race)
+    // doesn't append duplicate <style> nodes.
+    if (document.getElementById('tweaks-style')) return;
+    const el = document.createElement('style');
+    el.id = 'tweaks-style';
+    el.textContent = STYLE;
+    document.head.appendChild(el);
   }
 }
 

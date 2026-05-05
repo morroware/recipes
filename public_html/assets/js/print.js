@@ -36,7 +36,7 @@ if (page) {
   if (mode === 'booklet') {
     const mount = page.querySelector('[data-js="booklet-picker"]');
     let ids = (page.dataset.bookletIds || '')
-      .split(',').map(s => parseInt(s, 10)).filter(Number.isFinite);
+      .split(',').map(s => parseInt(s, 10)).filter(n => Number.isFinite(n) && n > 0);
     let picker = null;
     if (mount) {
       picker = new RecipePicker(mount, {

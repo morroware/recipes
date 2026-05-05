@@ -20,10 +20,10 @@
     <a href="<?= h(url_for('/print')) ?>"     <?= $active === 'print'     ? 'aria-current="page"' : '' ?>>🖨️ Print</a>
     <a href="<?= h(url_for('/chat')) ?>"      <?= $active === 'chat'      ? 'aria-current="page"' : '' ?>>✨ Chat</a>
     <a href="<?= h(url_for('/add')) ?>"       <?= $active === 'add'       ? 'aria-current="page"' : '' ?>>＋ Add</a>
-    <button type="button" data-js="ai-fab-trigger">✨ Quick assist</button>
-    <form method="post" action="<?= h(url_for('/logout')) ?>">
+    <button type="button" class="btn btn-sm" data-js="ai-fab-trigger">✨ Quick assist</button>
+    <form method="post" action="<?= h(url_for('/logout')) ?>" style="margin-top: 8px;">
       <?= csrf_field() ?>
-      <button type="submit" style="width:100%;">Sign out</button>
+      <button type="submit" class="btn btn-sm btn-ghost" style="width:100%;">Sign out</button>
     </form>
   </div>
 </div>

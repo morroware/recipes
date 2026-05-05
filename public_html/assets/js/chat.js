@@ -44,13 +44,22 @@ async function init() {
     }
   });
 
+  const sendBtn = els.form.querySelector('[data-chat="send"]');
   els.form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const message = els.input.value.trim();
     if (!message || state.sending) return;
+    // Set sending=true synchronously so a quick second Enter is rejected
+    // before the await in sendMessage has a chance to flip it.
+    state.sending = true;
+    if (sendBtn) sendBtn.disabled = true;
     els.input.value = '';
     autosize(els.input);
-    await sendMessage(message);
+    try {
+      await sendMessage(message);
+    } finally {
+      if (sendBtn) sendBtn.disabled = false;
+    }
   });
 
   els.newConv.addEventListener('click', () => startNewConversation());
@@ -158,9 +167,10 @@ async function init() {
     t.style.height = Math.min(t.scrollHeight, 240) + 'px';
   }
 
-  function setStatusIdle()    { els.statusDot.dataset.state = 'idle'; }
-  function setStatusBusy()    { els.statusDot.dataset.state = 'busy'; }
-  function setStatusError()   { els.statusDot.dataset.state = 'error'; }
+  const statusText = root.querySelector('[data-chat="status-text"]');
+  function setStatusIdle()  { els.statusDot.dataset.state = 'idle';  if (statusText) statusText.textContent = 'Idle'; }
+  function setStatusBusy()  { els.statusDot.dataset.state = 'busy';  if (statusText) statusText.textContent = 'Working…'; }
+  function setStatusError() { els.statusDot.dataset.state = 'error'; if (statusText) statusText.textContent = 'Error'; }
 
   function renderEmpty() {
     els.log.innerHTML = `
@@ -389,6 +399,11 @@ async function init() {
       const { data } = await apiFetch(`/api/ai/conversations/${id}`);
       state.conversationId = id;
       els.convTitle.textContent = data.conversation?.title || 'Conversation';
+      // Cancel any pending undo timers from the previous conversation so
+      // detached buttons don't keep ticking against removed DOM nodes.
+      els.log.querySelectorAll('.chat-undo-btn').forEach(btn => {
+        if (btn._timer) { clearTimeout(btn._timer); btn._timer = null; }
+      });
       els.log.innerHTML = '';
       const msgs = data.messages || [];
       if (!msgs.length) {

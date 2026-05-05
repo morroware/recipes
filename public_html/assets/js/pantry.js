@@ -16,19 +16,33 @@ if (page) {
   // ---- Add new item -------------------------------------------------------
   const addForm = page.querySelector('[data-js="pantry-add"]');
   if (addForm) {
+    let adding = false;
     addForm.addEventListener('submit', async (e) => {
       e.preventDefault();
+      if (adding) return;
       const input = addForm.querySelector('input[name="name"]');
       const name = (input.value || '').trim();
       if (!name) return;
+      adding = true;
+      const submitBtn = addForm.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
       try {
-        await apiFetch('/api/pantry', {
+        const { data } = await apiFetch('/api/pantry', {
           method: 'POST',
           body: JSON.stringify({ name, in_stock: true }),
         });
         input.value = '';
-        location.reload();
+        // Reload so the server can re-bucket the item into its proper category
+        // group + recompute "What can I make?" suggestions.  We could prepend
+        // optimistically, but the page's grouping/sort + suggestions render is
+        // server-side; reloading is the safer correctness choice.
+        toast(`+ Added ${data?.item?.name || name}`);
+        setTimeout(() => location.reload(), 200);
       } catch { /* toast already emitted */ }
+      finally {
+        adding = false;
+        if (submitBtn) submitBtn.disabled = false;
+      }
     });
   }
 
@@ -51,12 +65,16 @@ if (page) {
     if (!row) return;
     const id = row.dataset.id;
     const name = row.dataset.name;
-    const action = e.target.closest('[data-action]')?.dataset.action;
+    const actionEl = e.target.closest('[data-action]');
+    const action = actionEl?.dataset.action;
     if (!action) return;
 
     if (action === 'toggle-stock') {
       e.preventDefault();
-      const checked = e.target.classList.contains('checked');
+      // Read state off the resolved action element, not e.target — if the
+      // button gains a child element later, e.target may be that child and
+      // the .checked class read would lie.
+      const checked = actionEl.classList.contains('checked');
       try {
         await apiFetch(`/api/pantry/${id}`, {
           method: 'PATCH',
@@ -127,19 +145,22 @@ if (page) {
   if (tagForm) {
     const draft = tagForm.querySelector('[data-js="tag-draft"]');
     const hidden = tagForm.querySelector('[data-js="tags-hidden"]');
-    const addBtn = tagForm.querySelector('[data-js="tag-add"]');
-    const submitTag = () => {
+    // Intercept submit so we can splice the typed draft into the hidden
+    // `tags` field. Works for Enter-in-input AND clicking the submit button.
+    tagForm.addEventListener('submit', (e) => {
       const v = (draft.value || '').trim().toLowerCase();
-      if (!v) return;
-      const current = (hidden.value || '').split(',').map(s => s.trim()).filter(Boolean);
-      if (current.includes(v)) { draft.value = ''; return; }
+      if (!v) {
+        // Empty draft + existing tags — let the form submit as-is so the
+        // user can re-trigger the search. If there are no tags either,
+        // there's nothing to do.
+        if (!(hidden.value || '').trim()) e.preventDefault();
+        return;
+      }
+      const current = (hidden.value || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+      if (current.includes(v)) { draft.value = ''; e.preventDefault(); return; }
       current.push(v);
       hidden.value = current.join(',');
-      tagForm.submit();
-    };
-    addBtn.addEventListener('click', (e) => { e.preventDefault(); submitTag(); });
-    draft.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); submitTag(); }
+      // Native form submit takes over from here.
     });
   }
 }

@@ -297,8 +297,22 @@ class Recipe {
     }
 
     public static function setNotes(int $user_id, int $recipe_id, string $notes): bool {
+        // Preserve any existing gallery URLs (which live in a magic
+        // [gallery_json]…\n prefix on the notes column) and reject any
+        // attempt by the user to inject a new gallery prefix here, since
+        // the notes endpoint is plain text only and does not validate
+        // gallery URLs the way Recipe::sanitize() does.
+        $existingGallery = [];
+        $sel = db()->prepare('SELECT notes FROM recipes WHERE id = ? AND user_id = ? LIMIT 1');
+        $sel->execute([$recipe_id, $user_id]);
+        $row = $sel->fetch();
+        if ($row) {
+            $existingGallery = self::extractGalleryMeta((string)($row['notes'] ?? ''))['gallery_urls'];
+        }
+        $cleanNotes = self::extractGalleryMeta($notes)['notes']; // strip any user-supplied prefix
+        $merged = self::embedGalleryMeta($cleanNotes, $existingGallery);
         $upd = db()->prepare('UPDATE recipes SET notes = ? WHERE id = ? AND user_id = ?');
-        $upd->execute([$notes, $recipe_id, $user_id]);
+        $upd->execute([$merged, $recipe_id, $user_id]);
         return $upd->rowCount() > 0;
     }
 
@@ -416,7 +430,7 @@ class Recipe {
         if (mb_strlen($glyph) > 8) $glyph = mb_substr($glyph, 0, 8);
 
         $photo = trim((string)($data['photo_url'] ?? ''));
-        if ($photo !== '' && !preg_match('#^(https?://|/)#i', $photo)) {
+        if ($photo !== '' && !self::isSafeImageUrl($photo)) {
             throw new InvalidArgumentException('photo_url_invalid');
         }
 
@@ -475,7 +489,7 @@ class Recipe {
             foreach ($rawGallery as $g) {
                 $g = trim((string)$g);
                 if ($g === '') continue;
-                if (!preg_match('#^(https?://|/)#i', $g)) continue;
+                if (!self::isSafeImageUrl($g)) continue;
                 if (!in_array($g, $gallery, true)) $gallery[] = mb_substr($g, 0, 512);
             }
         }
@@ -496,6 +510,21 @@ class Recipe {
             'steps'        => $steps,
             'tags'         => $tags,
         ];
+    }
+
+    /**
+     * Accept only http(s) absolute URLs and same-origin paths beginning with a
+     * single "/" (rejecting protocol-relative "//evil.com" and javascript:/data:
+     * URIs that would slip through a naive prefix check).
+     */
+    private static function isSafeImageUrl(string $url): bool {
+        if ($url === '') return false;
+        if (preg_match('#^https?://#i', $url)) return true;
+        // Single-leading-slash path. Reject "//", "/\\", or any control char.
+        if ($url[0] !== '/') return false;
+        if (isset($url[1]) && ($url[1] === '/' || $url[1] === '\\')) return false;
+        if (preg_match('/[\x00-\x1F\x7F]/', $url)) return false;
+        return true;
     }
 
     private static function extractGalleryMeta(string $notes): array {
