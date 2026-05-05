@@ -119,7 +119,8 @@ $cooks    = $recent_cooks  ?? [];
     <section class="chat-main">
       <header class="chat-main-header row" style="justify-content: space-between; align-items: center;">
         <div>
-          <span class="chat-status-dot" data-chat="status-dot"></span>
+          <span class="chat-status-dot" data-chat="status-dot" aria-hidden="true"></span>
+          <span class="sr-only" data-chat="status-text" aria-live="polite">Idle</span>
           <strong data-chat="conv-title">New conversation</strong>
         </div>
         <div class="row" style="gap:6px;">

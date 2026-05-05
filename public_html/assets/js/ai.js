@@ -40,7 +40,7 @@ function buildPanel() {
   panelEl.className = 'ai-panel-overlay';
   panelEl.hidden = true;
   panelEl.innerHTML = `
-    <div class="ai-panel" role="dialog" aria-label="AI assistant">
+    <div class="ai-panel" role="dialog" aria-modal="true" aria-label="AI assistant">
       <div class="ai-panel-header">
         <span class="ai-panel-title">✨ Kitchen brain</span>
         <button class="btn btn-sm" data-ai="close" type="button" aria-label="Close">✕</button>
@@ -133,9 +133,24 @@ function wirePanel(panel) {
     }
 
     const modeBtn = e.target.closest('[data-mode]');
-    if (modeBtn && modeBtn.parentElement.contains(modeBtn)) {
+    if (modeBtn) {
       modeBtn.parentElement.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('active', b === modeBtn));
     }
+  });
+
+  // Escape closes the panel + focus trap so Tab cycles within the dialog.
+  panel.addEventListener('keydown', (e) => {
+    if (panel.hidden) return;
+    if (e.key === 'Escape') { e.preventDefault(); closePanel(); return; }
+    if (e.key !== 'Tab') return;
+    const focusables = Array.from(panel.querySelectorAll(
+      'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )).filter(el => el.offsetParent !== null);
+    if (!focusables.length) return;
+    const first = focusables[0];
+    const last  = focusables[focusables.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   });
 
   // Chat
@@ -592,6 +607,8 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;');
 }
 
+let panelLastFocused = null;
+
 export async function openPanel(initialTab = 'chat') {
   const enabled = await ensureStatus();
   if (!enabled) {
@@ -605,7 +622,11 @@ export async function openPanel(initialTab = 'chat') {
   panel.querySelectorAll('.ai-pane').forEach(p => {
     p.hidden = p.dataset.pane !== initialTab;
   });
+  panelLastFocused = (document.activeElement instanceof HTMLElement) ? document.activeElement : null;
   panel.hidden = false;
+  // Focus the close button so keyboard users land somewhere meaningful.
+  const closeBtn = panel.querySelector('[data-ai="close"]');
+  closeBtn?.focus();
   if (initialTab === 'chat') hydrateChatLog().catch(() => {});
 }
 
@@ -631,7 +652,17 @@ async function hydrateChatLog() {
 }
 
 function closePanel() {
-  if (panelEl) panelEl.hidden = true;
+  if (!panelEl) return;
+  panelEl.hidden = true;
+  // Cancel any in-flight Undo countdown timers so detached buttons don't keep
+  // ticking and pinning their DOM nodes in memory.
+  panelEl.querySelectorAll('.chat-undo-btn').forEach(btn => {
+    if (btn._timer) { clearTimeout(btn._timer); btn._timer = null; }
+  });
+  if (panelLastFocused && typeof panelLastFocused.focus === 'function') {
+    try { panelLastFocused.focus(); } catch {}
+  }
+  panelLastFocused = null;
 }
 
 // ----- FAB + drawer wiring -------------------------------------------------
@@ -678,7 +709,10 @@ function wireDrawer() {
 
   drawer.addEventListener('click', (e) => { if (e.target === drawer) set(false); });
   panel.addEventListener('click', (e) => {
-    if (e.target.closest('a[href]')) set(false);
+    // Close the drawer for both internal navigation (links) and the
+    // drawer-internal AI trigger so the panel doesn't open *behind* an open
+    // drawer.
+    if (e.target.closest('a[href], [data-js="ai-fab-trigger"], button[type="submit"]')) set(false);
   });
 
   document.addEventListener('keydown', (e) => {

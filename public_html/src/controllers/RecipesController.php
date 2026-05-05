@@ -162,7 +162,9 @@ class RecipesController {
         $name = 'recipe-' . date('Ymd-His') . '-' . bin2hex(random_bytes(6)) . '.' . $extMap[$mime];
         $dest = $destDir . '/' . $name;
         if (!move_uploaded_file($tmp, $dest)) json_err('upload_store_failed', 500);
-        json_ok(['url' => '/assets/img/uploads/' . $name]);
+        // Honor app_base_path so subdir installs return a URL the browser
+        // can actually fetch.
+        json_ok(['url' => url_for('/assets/img/uploads/' . $name)]);
     }
 
     private static function readJson(): array {

@@ -12,10 +12,10 @@ $lockPath   = APP_ROOT . '/db/install.lock';
 $schemaPath = APP_ROOT . '/db/schema.sql';
 $seedsPath  = APP_ROOT . '/db/seeds.sql';
 
-if (is_file($configPath) && is_file($lockPath)) {
+if (is_file($configPath) || is_file($lockPath)) {
     http_response_code(403);
     echo install_layout('Installer locked',
-        '<p>This installer has already run. Delete <code>public_html/db/install.lock</code> and <code>public_html/config.php</code> if you really want to reinstall.</p>'
+        '<p>This installer has already run. To reinstall, remove <strong>both</strong> <code>public_html/db/install.lock</code> <em>and</em> <code>public_html/config.php</code>.</p>'
         . '<p><a href="' . htmlspecialchars(install_url_for('/')) . '">Go to the app →</a></p>');
     exit;
 }

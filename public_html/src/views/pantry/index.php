@@ -146,12 +146,14 @@
       <form class="row" style="margin-bottom: 14px;" method="get" action="<?= h(url_for('/pantry')) ?>" data-js="pantry-tag-form">
         <input type="hidden" name="mode" value="tag">
         <input type="hidden" name="tags" value="<?= h(implode(',', $tags)) ?>" data-js="tags-hidden">
+        <label class="sr-only" for="pantry-tag-draft">Ingredient to add</label>
         <input class="search-input"
+               id="pantry-tag-draft"
                type="text"
                placeholder="ingredient + Enter…"
                autocomplete="off"
                data-js="tag-draft">
-        <button type="button" class="btn btn-primary" data-js="tag-add">Add</button>
+        <button type="submit" class="btn btn-primary" data-js="tag-add">Add</button>
       </form>
 
       <div style="margin-bottom: 18px;" data-js="tag-list">
@@ -159,8 +161,9 @@
           <a href="<?php
               $rest = array_values(array_filter($tags, fn($x) => $x !== $t));
               echo h(url_for('/pantry')) . '?mode=tag' . ($rest ? '&tags=' . urlencode(implode(',', $rest)) : '');
-            ?>" class="pantry-tag" style="background: var(--butter); text-decoration: none; color: inherit;">
-            <?= h($t) ?> <span class="pantry-tag-x">✕</span>
+            ?>" class="pantry-tag" style="background: var(--butter); text-decoration: none; color: inherit;"
+             aria-label="Remove <?= h($t) ?>">
+            <?= h($t) ?> <span class="pantry-tag-x" aria-hidden="true">✕</span>
           </a>
         <?php endforeach; ?>
       </div>

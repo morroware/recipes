@@ -38,11 +38,15 @@ if (page) {
   let activeDay = null;
   let lastFocus = null;
 
+  function onOverlayKey(e) {
+    if (e.key === 'Escape') { e.preventDefault(); closePicker(); }
+  }
   function openPicker(day, anchor) {
     activeDay = day;
     lastFocus = anchor || document.activeElement;
     if (dayLabel) dayLabel.textContent = day;
     overlay.hidden = false;
+    document.addEventListener('keydown', onOverlayKey);
     if (!picker) {
       picker = new RecipePicker(mount, {
         recipes,
@@ -68,6 +72,7 @@ if (page) {
   function closePicker() {
     overlay.hidden = true;
     activeDay = null;
+    document.removeEventListener('keydown', onOverlayKey);
     lastFocus?.focus();
   }
 
@@ -96,10 +101,6 @@ if (page) {
 
   closeBtn?.addEventListener('click', closePicker);
   overlay?.addEventListener('click', (e) => { if (e.target === overlay) closePicker(); });
-  document.addEventListener('keydown', (e) => {
-    if (overlay.hidden) return;
-    if (e.key === 'Escape') closePicker();
-  });
 
   page.querySelector('[data-js="clear-week"]')?.addEventListener('click', async () => {
     if (!confirm('Clear the entire week?')) return;
@@ -117,10 +118,15 @@ if (page) {
       const recipes = data?.recipes ?? 0;
       if (recipes === 0) {
         toast('Plan is empty — assign recipes first', 'error');
+        btn.disabled = false;
       } else {
         toast(`🛒 Added ${added} ingredients from ${recipes} recipe${recipes === 1 ? '' : 's'}`);
+        // Keep the button disabled until navigation kicks in so the user
+        // can't trigger a second build during the toast window.
         setTimeout(() => { location.href = appUrl('/shopping'); }, 800);
       }
-    } catch {} finally { btn.disabled = false; }
+    } catch {
+      btn.disabled = false;
+    }
   });
 }

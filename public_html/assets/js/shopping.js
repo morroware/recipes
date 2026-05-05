@@ -19,6 +19,9 @@ if (page) {
   const addForm   = page.querySelector('[data-js="add-form"]');
 
   const countPill = page.querySelector('[data-js="count-pill"]');
+  // Track previous total so we only reload to swap in the empty-state UI when
+  // the list actually drained (vs. the page rendering with zero rows).
+  let lastTotal = list ? list.querySelectorAll('.shop-row').length : 0;
   const recompute = () => {
     if (!list) return;
     const rows = list.querySelectorAll('.shop-row');
@@ -33,11 +36,14 @@ if (page) {
     }
     if (countPill) countPill.style.display = total === 0 ? 'none' : '';
     if (clearBtn) clearBtn.hidden = total === 0;
-    if (total === 0) {
-      // Reload to render the server-side empty state and remove the list panel.
-      // This also hides the print/clear buttons via PHP conditionals.
-      location.reload();
+    if (total === 0 && lastTotal > 0) {
+      // List just drained — reload so the server renders the empty state
+      // (which also hides the print/clear buttons via PHP conditionals).
+      lastTotal = 0;
+      setTimeout(() => location.reload(), 250);
+      return;
     }
+    lastTotal = total;
   };
 
   // ---- add form ----------------------------------------------------------

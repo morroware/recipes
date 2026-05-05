@@ -75,10 +75,12 @@ $d = [
         </div>
         <div class="form-field">
           <label class="form-label">Difficulty</label>
-          <div class="row" data-js="diff-row">
+          <div class="row" data-js="diff-row" role="radiogroup" aria-label="Difficulty">
             <?php foreach ($diffs as $df): ?>
               <button type="button" class="filter-chip <?= $d['difficulty'] === $df ? 'active' : '' ?>"
-                      data-difficulty="<?= h($df) ?>"><?= h($df) ?></button>
+                      data-difficulty="<?= h($df) ?>"
+                      role="radio"
+                      aria-checked="<?= $d['difficulty'] === $df ? 'true' : 'false' ?>"><?= h($df) ?></button>
             <?php endforeach; ?>
             <input type="hidden" name="difficulty" value="<?= h($d['difficulty']) ?>">
           </div>
@@ -95,11 +97,14 @@ $d = [
         </div>
         <div class="form-field">
           <label class="form-label">Card color</label>
-          <div class="row" data-js="color-row">
+          <div class="row" data-js="color-row" role="radiogroup" aria-label="Card color">
             <?php foreach ($colorOpts as $c): $bg = STICKER_COLORS[$c]['bg']; ?>
               <button type="button"
                       data-color="<?= h($c) ?>"
                       title="<?= h($c) ?>"
+                      aria-label="<?= h(ucfirst($c)) ?> color"
+                      role="radio"
+                      aria-checked="<?= $d['color'] === $c ? 'true' : 'false' ?>"
                       style="width:36px;height:36px;border-radius:10px;cursor:pointer;background:<?= h($bg) ?>;
                              border:<?= $d['color'] === $c ? '3px solid var(--ink)' : '2px solid var(--ink)' ?>;
                              box-shadow:<?= $d['color'] === $c ? '3px 3px 0 var(--ink)' : 'none' ?>;"></button>

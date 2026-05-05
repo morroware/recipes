@@ -27,7 +27,9 @@ if (page) {
     e.preventDefault();
     diffInput.value = btn.dataset.difficulty;
     for (const sib of diffRow.querySelectorAll('[data-difficulty]')) {
-      sib.classList.toggle('active', sib === btn);
+      const sel = sib === btn;
+      sib.classList.toggle('active', sel);
+      sib.setAttribute('aria-checked', sel ? 'true' : 'false');
     }
   });
 
@@ -43,6 +45,7 @@ if (page) {
       const sel = sib === btn;
       sib.style.border = sel ? '3px solid var(--ink)' : '2px solid var(--ink)';
       sib.style.boxShadow = sel ? '3px 3px 0 var(--ink)' : 'none';
+      sib.setAttribute('aria-checked', sel ? 'true' : 'false');
     }
   });
 
@@ -98,8 +101,14 @@ if (page) {
   });
 
   // ---- Submit ------------------------------------------------------------
+  let submitting = false;
   form?.addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (submitting) return;
+
+    const status = page.querySelector('[data-js="save-status"]');
+    const btn    = page.querySelector('[data-js="save-btn"]');
+
     const fd = new FormData(form);
     const ingredients = Array.from(ingList.querySelectorAll('[data-js="ingredient-row"]'))
       .map(row => ({
@@ -113,59 +122,71 @@ if (page) {
       .map(row => row.querySelector('[data-field="step"]').value.trim())
       .filter(Boolean);
 
-    let galleryUrls = (fd.get('gallery_urls') || '').toString().split(',').map(s => s.trim()).filter(Boolean);
-    if (galleryFiles?.files?.length) {
-      for (const file of Array.from(galleryFiles.files)) {
-        const up = new FormData();
-        up.append('image', file);
-        const res = await apiFetch('/api/uploads/recipe-image', { method: 'POST', body: up });
-        if (res?.data?.url) galleryUrls.push(res.data.url);
-      }
-      galleryUrls = [...new Set(galleryUrls)];
-    }
-
-    const payload = {
-      title:        (fd.get('title') || '').toString().trim(),
-      summary:      (fd.get('summary') || '').toString(),
-      cuisine:      (fd.get('cuisine') || '').toString().trim(),
-      time_minutes: parseInt(fd.get('time_minutes') || '0', 10),
-      servings:     parseInt(fd.get('servings') || '1', 10),
-      difficulty:   (fd.get('difficulty') || 'Easy').toString(),
-      glyph:        (fd.get('glyph') || '🍽️').toString(),
-      color:        (fd.get('color') || 'mint').toString(),
-      photo_url:    (fd.get('photo_url') || '').toString().trim(),
-      gallery_urls: galleryUrls,
-      tags:         (fd.get('tags') || '').toString(),
-      notes:        (fd.get('notes') || '').toString(),
-      ingredients,
-      steps,
-    };
-    if (!payload.title) {
+    if (!(fd.get('title') || '').toString().trim()) {
       toast('Title is required', 'error');
       return;
     }
 
-    const status = page.querySelector('[data-js="save-status"]');
-    const btn    = page.querySelector('[data-js="save-btn"]');
-    btn.disabled = true;
-    if (status) status.textContent = 'Saving…';
+    // Lock the button BEFORE any awaits so a quick second Enter doesn't
+    // queue a duplicate save while images are still uploading.
+    submitting = true;
+    if (btn) btn.disabled = true;
+
     try {
-      let url, method;
-      if (mode === 'edit') {
-        url = `/api/recipes/${recipeId}`; method = 'PUT';
-      } else {
-        url = '/api/recipes'; method = 'POST';
+      let galleryUrls = (fd.get('gallery_urls') || '').toString().split(',').map(s => s.trim()).filter(Boolean);
+      if (galleryFiles?.files?.length) {
+        const files = Array.from(galleryFiles.files);
+        const failures = [];
+        for (let i = 0; i < files.length; i++) {
+          if (status) status.textContent = `Uploading image ${i + 1} of ${files.length}…`;
+          const up = new FormData();
+          up.append('image', files[i]);
+          try {
+            const res = await apiFetch('/api/uploads/recipe-image', { method: 'POST', body: up });
+            if (res?.data?.url) galleryUrls.push(res.data.url);
+          } catch {
+            failures.push(files[i].name || `file ${i + 1}`);
+          }
+        }
+        if (failures.length) {
+          toast(`Couldn't upload: ${failures.join(', ')}`, 'error');
+        }
+        galleryUrls = [...new Set(galleryUrls)];
       }
+
+      const payload = {
+        title:        (fd.get('title') || '').toString().trim(),
+        summary:      (fd.get('summary') || '').toString(),
+        cuisine:      (fd.get('cuisine') || '').toString().trim(),
+        time_minutes: parseInt(fd.get('time_minutes') || '0', 10),
+        servings:     parseInt(fd.get('servings') || '1', 10),
+        difficulty:   (fd.get('difficulty') || 'Easy').toString(),
+        glyph:        (fd.get('glyph') || '🍽️').toString(),
+        color:        (fd.get('color') || 'mint').toString(),
+        photo_url:    (fd.get('photo_url') || '').toString().trim(),
+        gallery_urls: galleryUrls,
+        tags:         (fd.get('tags') || '').toString(),
+        notes:        (fd.get('notes') || '').toString(),
+        ingredients,
+        steps,
+      };
+
+      if (status) status.textContent = 'Saving…';
+      const url    = mode === 'edit' ? `/api/recipes/${recipeId}` : '/api/recipes';
+      const method = mode === 'edit' ? 'PUT' : 'POST';
       const { data } = await apiFetch(url, {
         method,
         body: JSON.stringify(payload),
       });
       const id = data?.id ?? recipeId;
       toast(mode === 'edit' ? '✓ Saved' : '✓ Recipe saved');
+      // Keep the button disabled across the redirect so the user can't
+      // double-tap save during the 400ms toast window.
       setTimeout(() => { location.href = appUrl(`/recipes/${id}`); }, 400);
-    } catch (err) {
+    } catch {
       if (status) status.textContent = '';
-      btn.disabled = false;
+      if (btn) btn.disabled = false;
+      submitting = false;
     }
   });
 

@@ -91,7 +91,8 @@
   --cream-2: #25201A;
   --ink: #FBF7F0;
   --ink-2: #C8C0B0;
-  --ink-soft: #8A8174;
+  /* Light value (#8A8174) failed WCAG AA against dark cream — bumped to ~5.5:1. */
+  --ink-soft: #B0A998;
   --shadow-sticker: 4px 4px 0 #000;
   --shadow-sticker-lg: 6px 6px 0 #000;
 }
@@ -349,11 +350,21 @@ button { font-family: inherit; cursor: pointer; }
   overflow: hidden;
   box-shadow: var(--shadow-sticker);
   transition: transform 0.1s, box-shadow 0.1s;
-  cursor: pointer;
   display: flex;
   flex-direction: column;
   position: relative;
 }
+/* Real anchor wraps the card body so the whole card is clickable / keyboard
+   focusable, while the favorite button stays a sibling (no invalid nesting). */
+.recipe-card-link {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+.recipe-card-link:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
 .recipe-card:hover { transform: translate(-2px, -2px); box-shadow: var(--shadow-sticker-lg); }
 [data-sticker-rotate="on"] .recipe-card:hover { transform: translate(-2px, -2px) rotate(-0.5deg); }
 [data-dot-grid="off"] body::before { display: none; }
@@ -669,6 +680,67 @@ button { font-family: inherit; cursor: pointer; }
   align-items: center;
 }
 .cook-controls .btn { padding: 14px 24px; font-size: 16px; }
+
+/* The native <dialog> backdrop + reset so cook-mode doesn't fall back to the
+   white-on-black browser default. */
+dialog.cook-dialog {
+  border: 0; padding: 0; background: transparent; color: inherit;
+  width: 100vw; max-width: 100vw; height: 100vh; max-height: 100vh;
+  margin: 0;
+}
+dialog.cook-dialog::backdrop { background: rgba(0,0,0,0.4); }
+dialog.cook-dialog .cook-overlay { position: static; height: 100%; }
+
+/* "I made this" rating dialog: small modal with stars + notes. */
+dialog.cook-log-dialog {
+  border: 2px solid var(--ink);
+  border-radius: var(--r-md);
+  background: var(--cream);
+  color: var(--ink);
+  box-shadow: var(--shadow-sticker-lg);
+  padding: 0;
+  max-width: 420px;
+  width: calc(100% - 32px);
+}
+dialog.cook-log-dialog::backdrop { background: rgba(0,0,0,0.35); }
+.cook-log-form { padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
+.cook-log-stars { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.cook-log-star {
+  background: transparent; border: 0; cursor: pointer; padding: 4px 6px;
+  font-size: 28px; line-height: 1; color: var(--ink-2);
+}
+.cook-log-star.active { color: var(--coral); }
+.cook-log-star:focus-visible { outline: 2px solid var(--ink); border-radius: 4px; }
+.cook-log-clear { margin-left: auto; font-size: 12px; }
+.cook-log-notes-label { display: flex; flex-direction: column; gap: 4px; }
+.cook-log-notes { width: 100%; resize: vertical; }
+.cook-log-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+
+/* Generic icon-only button (used in chat memory rail, AI panel, mobile). */
+.icon-btn {
+  background: transparent;
+  border: 0;
+  padding: 6px 8px;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--ink-soft);
+  border-radius: var(--r-sm);
+}
+.icon-btn:hover { color: var(--ink); background: var(--cream-2); }
+.icon-btn:focus-visible { outline: 2px solid var(--ink); }
+
+/* Visually-hidden helper for screen-reader-only labels. */
+.sr-only {
+  position: absolute !important;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+/* Make <main> visibly highlighted when the skip-link jumps focus there. */
+main#main-content:focus { outline: 3px solid var(--ink); outline-offset: -3px; }
+main#main-content:focus:not(:focus-visible) { outline: 0; }
 
 /* ---------------- Pantry / Search by ingredient ---------------- */
 .pantry-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
@@ -1074,6 +1146,8 @@ button { font-family: inherit; cursor: pointer; }
   background: white;
   color: #111;
   width: 8.5in;
+  max-width: 100%;
+  box-sizing: border-box;
   min-height: 11in;
   margin: 0 auto 24px;
   padding: 0.6in 0.7in;
@@ -1151,6 +1225,8 @@ button { font-family: inherit; cursor: pointer; }
 .print-card {
   background: white;
   width: 6in;
+  max-width: 100%;
+  box-sizing: border-box;
   min-height: 4in;
   border: 2px solid #111;
   border-radius: 8px;

@@ -3,8 +3,11 @@
 $colors = STICKER_COLORS[$recipe['color']] ?? STICKER_COLORS['mint'];
 $tagColors = TAG_PILL_COLORS;
 $isFav = !empty($recipe['is_favorite']);
-$ingredientsJson = json_encode($recipe['ingredients'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-$stepsJson       = json_encode(array_column($recipe['steps'], 'text'), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+// JSON_HEX_TAG escapes `<` / `>` so a recipe title containing `</script>` can't
+// break out of the embedded <script type="application/json"> tag.
+$jsonFlags = JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT;
+$ingredientsJson = json_encode($recipe['ingredients'], $jsonFlags);
+$stepsJson       = json_encode(array_column($recipe['steps'], 'text'), $jsonFlags);
 ?>
 <div class="page recipe-print"
      data-page="recipes-show"
@@ -58,10 +61,23 @@ $stepsJson       = json_encode(array_column($recipe['steps'], 'text'), JSON_UNES
         </div>
         <ul class="ingredient-list" data-bind="ingredient-list">
           <?php foreach ($recipe['ingredients'] as $ing): ?>
+            <?php
+              // Server-rendered fallback: if the qty/unit pill is empty, the
+              // page looks broken before detail.js boots (or for no-JS users).
+              // detail.js overwrites this on first paint with scaled values.
+              $ssrQty = '';
+              $rawQty = $ing['qty'] ?? null;
+              if ($rawQty !== null && $rawQty !== '') {
+                  $n = (float)$rawQty;
+                  $ssrQty = (floor($n) == $n) ? (string)(int)$n : rtrim(rtrim(number_format($n, 2, '.', ''), '0'), '.');
+              }
+              $ssrUnit = (string)($ing['unit'] ?? '');
+              $ssrLabel = trim($ssrQty . ($ssrUnit !== '' ? ' ' . $ssrUnit : ''));
+            ?>
             <li class="ingredient-row"
                 data-qty="<?= h($ing['qty'] ?? '') ?>"
                 data-unit="<?= h($ing['unit']) ?>">
-              <span class="ingredient-qty"><?php // populated by detail.js on first paint ?></span>
+              <span class="ingredient-qty"><?= h($ssrLabel) ?></span>
               <span class="ingredient-name"><?= h($ing['name']) ?></span>
             </li>
           <?php endforeach; ?>

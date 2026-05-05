@@ -9,9 +9,14 @@ define('SRC_PATH', APP_ROOT . '/src');
 define('DB_PATH',  APP_ROOT . '/db');
 
 // 1) Bounce to the installer until config.php exists.
+//    We can't use url_for() here yet — constants.php loads later — so derive
+//    the base path inline from SCRIPT_NAME so subdir installs still work.
 $configPath = APP_ROOT . '/config.php';
 if (!is_file($configPath)) {
-    header('Location: ' . url_for('/install.php'));
+    $script = $_SERVER['SCRIPT_NAME'] ?? '/index.php';
+    $dir = str_replace('\\', '/', dirname($script));
+    $base = ($dir === '/' || $dir === '.') ? '' : rtrim($dir, '/');
+    header('Location: ' . $base . '/install.php');
     exit;
 }
 $CONFIG = require $configPath;
@@ -167,10 +172,6 @@ require SRC_PATH . '/views/layout.php';
 exit;
 
 // ---- inline handlers -------------------------------------------------------
-
-function home_placeholder(): void {
-    render('_home_placeholder.php', ['title' => 'my little cookbook']);
-}
 
 function healthz(): void {
     json_ok([

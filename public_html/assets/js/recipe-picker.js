@@ -127,12 +127,25 @@ export class RecipePicker {
     search.placeholder = `Search ${this.recipes.length} recipes…`;
     search.autocomplete = 'off';
     search.value = this.search;
+    let searchTimer = null;
     search.addEventListener('input', () => {
-      this.search = search.value;
-      this.refreshList();
+      // 150ms debounce keeps each keystroke from triggering a full refilter
+      // (which can churn through hundreds of rows).
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => {
+        this.search = search.value;
+        this.refreshList();
+      }, 150);
     });
     head.appendChild(search);
-    setTimeout(() => search.focus(), 0);
+    // Only autofocus on devices with a real pointer — auto-popping the iOS
+    // keyboard the moment the picker opens is jarring, and we re-focus on
+    // every render which steals input from anything the user is doing.
+    if (!this._didInitialFocus
+        && (typeof matchMedia !== 'function' || matchMedia('(hover: hover)').matches)) {
+      setTimeout(() => search.focus(), 0);
+      this._didInitialFocus = true;
+    }
 
     const row = document.createElement('div');
     row.className = 'row';

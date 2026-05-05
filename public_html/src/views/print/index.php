@@ -172,5 +172,5 @@ $dateLabel = (new DateTime('today'))->format('l, F j');
   'photo_url'    => $r['photo_url'] ?? null,
   'tags'         => $r['tags'] ?? [],
   'is_favorite'  => (int)($r['is_favorite'] ?? 0),
-], $recipes), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
+], $recipes), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?></script>
 <script type="module" src="<?= h(url_for('/assets/js/print.js')) ?>"></script>

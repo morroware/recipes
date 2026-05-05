@@ -12,7 +12,7 @@ class AuthController {
 
     public function showLogin(): void {
         if (is_logged_in()) { redirect('/'); }
-        $next  = $_GET['next'] ?? '/';
+        $next  = self::safeNext((string)($_GET['next'] ?? '/'));
         $error = $_GET['err'] ?? '';
         render('auth/login.php', [
             'title' => 'sign in · my little cookbook',
@@ -25,10 +25,7 @@ class AuthController {
         csrf_require();
         $email = trim((string)($_POST['email'] ?? ''));
         $pass  = (string)($_POST['password'] ?? '');
-        $next  = $_POST['next'] ?? '/';
-        if (!filter_var($next, FILTER_VALIDATE_URL, FILTER_FLAG_PATH_REQUIRED) && !str_starts_with($next, '/')) {
-            $next = '/';
-        }
+        $next  = self::safeNext((string)($_POST['next'] ?? '/'));
         if ($email === '' || $pass === '') {
             redirect('/login?err=' . urlencode('Please enter email and password.') . '&next=' . urlencode($next));
         }
@@ -42,5 +39,18 @@ class AuthController {
         csrf_require();
         auth_logout();
         redirect('/login');
+    }
+
+    /**
+     * Restrict ?next= to same-origin paths. Rejects schemed URLs and
+     * protocol-relative ("//evil.com") / backslash-prefixed forms that some
+     * browsers treat as authority components.
+     */
+    private static function safeNext(string $next): string {
+        if ($next === '' || $next[0] !== '/') return '/';
+        if (strlen($next) > 1 && ($next[1] === '/' || $next[1] === '\\')) return '/';
+        // Strip control chars and leading whitespace tricks just in case.
+        if (preg_match('/[\x00-\x1F\x7F]/', $next)) return '/';
+        return $next;
     }
 }

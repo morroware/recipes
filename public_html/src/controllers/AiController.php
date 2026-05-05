@@ -163,11 +163,28 @@ class AiController {
         $title = trim((string)($body['recipe_title'] ?? ''));
         $rid   = isset($body['recipe_id']) && $body['recipe_id'] !== '' ? (int)$body['recipe_id'] : null;
         if ($title === '' && !$rid) json_err('recipe_required', 422);
+        // If a recipe_id is supplied, it must belong to this user — otherwise
+        // we silently log against another user's recipe id (privacy issue if
+        // multi-user is enabled later).
+        if ($rid !== null) {
+            $owned = Recipe::findById($uid, $rid);
+            if (!$owned) {
+                $rid = null;
+                if ($title === '') json_err('recipe_not_found', 404);
+            } elseif ($title === '') {
+                $title = (string)$owned['title'];
+            }
+        }
+        $rating = null;
+        if (isset($body['rating']) && $body['rating'] !== '' && $body['rating'] !== null) {
+            $r = (int)$body['rating'];
+            if ($r >= 1 && $r <= 5) $rating = $r;
+        }
         $row = CookingLog::add(
             $uid,
             $rid,
             $title,
-            isset($body['rating']) && $body['rating'] !== '' ? (int)$body['rating'] : null,
+            $rating,
             isset($body['notes']) ? (string)$body['notes'] : null
         );
         json_ok(['entry' => $row]);
@@ -1146,7 +1163,15 @@ class AiController {
                     $plan = Plan::normalizePlanMap($rawPlan);
                     $clean = [];
                     $invalid = [];
-                    $unknownDays = array_diff(array_keys($rawPlan), array_keys($plan));
+                    // Only count keys that did NOT normalise as unknown — comparing
+                    // raw keys (e.g. "Monday") against normalised keys (e.g. "Mon")
+                    // would otherwise flag every successful entry as unknown.
+                    $unknownDays = [];
+                    foreach (array_keys($rawPlan) as $rawKey) {
+                        if (Plan::normalizeDay((string)$rawKey) === null) {
+                            $unknownDays[] = (string)$rawKey;
+                        }
+                    }
                     foreach ($plan as $day => $rid) {
                         if ($rid === null || $rid === '') {
                             $clean[$day] = null;
@@ -1163,7 +1188,7 @@ class AiController {
                             'ok' => false,
                             'error' => 'no_valid_assignments',
                             'invalid_days'  => $invalid,
-                            'unknown_keys'  => array_values($unknownDays),
+                            'unknown_keys'  => $unknownDays,
                             'message' => 'No usable day → recipe pairs. Day keys must be Mon..Sun; recipe ids must reference existing recipes (use recipe_search to resolve titles to ids).',
                         ];
                     }
