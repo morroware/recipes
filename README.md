@@ -54,13 +54,15 @@ var) enables Claude-powered features:
 Existing installs need the new AI tables. Two ways to apply migrations:
 
 **Web (recommended for shared cPanel hosts without SSH).** Visit
-`/migrate.php` while signed in as the admin. It walks every file in
+`migrate.php` (e.g. `https://yourdomain.com/migrate.php`, or
+`https://yourdomain.com/cookbook/migrate.php` if you installed the app in
+a subdirectory) while signed in as the admin. It walks every file in
 `public_html/db/migrations/`, applies anything that hasn't run on this
 database yet, and reports per-file pass/fail. Safe to re-run — applied
 migrations are recorded in a `schema_migrations` table and skipped on
 subsequent visits. If a future migration ever locks you out of login, you
-can also reach it via `/migrate.php?key=<app_key>` using the value already
-written into `config.php`.
+can also reach it with `?key=<app_key>` appended to the URL, using the
+value already written into `config.php`.
 
 **CLI (if you have SSH/`mysql` access):**
 
